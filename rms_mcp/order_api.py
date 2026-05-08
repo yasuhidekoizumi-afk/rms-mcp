@@ -24,10 +24,13 @@ class OrderAPI:
         }
         if progress_list is not None:
             payload["orderProgressList"] = progress_list
-        return self._c.post("/order/search", json=payload).json()
+        return self._c.post("/order/searchOrder/", json=payload).json()
 
     def get_order(self, order_numbers: list[str]) -> dict:
-        return self._c.post("/order/getOrder", json=order_numbers).json()
+        return self._c.post(
+            "/order/getOrder/",
+            json={"orderNumberList": order_numbers, "version": "7"},
+        ).json()
 
 
 class PurchaseItemAPI:
@@ -45,4 +48,4 @@ class PurchaseItemAPI:
         }
         if progress_list is not None:
             payload["orderProgressList"] = progress_list
-        return self._c.post("/order/searchOrderItem", json=payload).json()
+        return self._c.post("/purchaseItem/searchOrderItem/", json=payload).json()
