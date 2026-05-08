@@ -4,7 +4,7 @@
 
 ## できること
 
-Hermes (or any MCP client) から楽天RMSのデータを取得:
+Claude Code（または任意のMCPクライアント）から楽天RMSのデータを取得:
 
 | ツール | 説明 |
 |--------|------|
@@ -12,8 +12,6 @@ Hermes (or any MCP client) から楽天RMSのデータを取得:
 | `rms_product_ranking` | 商品別ランキング（数量・売上・平均単価） |
 | `rms_order_detail` | 注文番号指定で全詳細JSON |
 | `rms_cancel_rate` | キャンセル率・件数 |
-
-内部では RakutenPayOrderAPI を使用しています。
 
 ## セットアップ
 
@@ -46,19 +44,24 @@ c.close()
 "
 ```
 
-## Hermes設定
+## Claude Code 設定
 
-`~/.hermes/config.yaml`:
+`.mcp.json`:
 
-```yaml
-mcp_servers:
-  rms-mcp:
-    command: uv
-    args: ["run", "rms-mcp"]
-    cwd: /path/to/rms-mcp
-    env:
-      RMS_SERVICE_SECRET: "SP404839_xxx"
-      RMS_LICENSE_KEY: "SL404839_xxx"
+```json
+{
+  "mcpServers": {
+    "rms-mcp": {
+      "command": "uv",
+      "args": ["run", "rms-mcp"],
+      "cwd": "/path/to/rms-mcp",
+      "env": {
+        "RMS_SERVICE_SECRET": "SP404839_xxx",
+        "RMS_LICENSE_KEY": "SL404839_xxx"
+      }
+    }
+  }
+}
 ```
 
 ## クイックリファレンス
@@ -75,6 +78,10 @@ mcp_servers:
 - [ ] InventoryAPI
 - [ ] ProductAPI
 - [ ] CouponAPI
+
+## 📖 導入マニュアル
+
+詳しい導入手順は [SETUP.md](SETUP.md) を参照してください。
 
 ## License
 
