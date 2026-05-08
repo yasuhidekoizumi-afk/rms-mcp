@@ -33,13 +33,15 @@ export RMS_LICENSE_KEY="SL404839_xxxxxxxxxx"
 ## 動作確認
 
 ```bash
-RMS_SERVICE_SECRET="..." RMS_LICENSE_KEY="..." uv run python -c "
+RMS_SERVICE_SECRET="SP404839_xxx" RMS_LICENSE_KEY="SL404839_xxx" uv run python -c "
 from rms_mcp.order_api import OrderAPI
 from rms_mcp.client import RMSClient
-c = RMSClient('SP...', 'SL...')
+c = RMSClient('SP404839_xxx', 'SL404839_xxx')
 api = OrderAPI(c)
-r = api.search_orders('2026-05-01T00:00:00+0900','2026-05-08T23:59:59+0900')
-print(len(r.get('orderNumberList',[])), '件')
+nums = api.search_orders('2026-05-01T00:00:00+0900','2026-05-08T23:59:59+0900').get('orderNumberList', [])
+orders = api.get_order(nums).get('OrderModelList', [])
+total = sum(o.get('totalPrice', 0) or 0 for o in orders)
+print(f'接続成功！ {len(nums)}件  {total:,}円')
 c.close()
 "
 ```
