@@ -16,8 +16,8 @@ class RMSClient:
         self.service_secret = service_secret
         self.license_key = license_key
         creds = f"{service_secret}:{license_key}"
-        auth_str = base64.b64encode(creds.encode("ascii")).decode()
-        self._auth = f"ESA {auth_str}"
+        auth_bytes = base64.b64encode(creds.encode("ascii"))
+        self._auth = f"ESA {auth_bytes.decode()}"
         self._client = httpx.Client(
             base_url=REST_BASE,
             timeout=30.0,
@@ -28,7 +28,13 @@ class RMSClient:
         kw.setdefault("headers", {})
         kw["headers"]["Authorization"] = self._auth
         r = self._client.request(method, path, **kw)
-        r.raise_for_status()
+        if not r.is_success:
+            body = r.text[:2000]
+            raise RuntimeError(
+                f"RMS API {r.status_code} for {method} {path}\n"
+                f"Auth header: {self._auth[:80]}...\n"
+                f"Response: {body}"
+            )
         return r
 
     def get(self, path: str, **kw):
