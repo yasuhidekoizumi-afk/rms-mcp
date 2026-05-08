@@ -21,16 +21,22 @@ class OrderAPI:
             "dateType": date_type,
             "startDatetime": start_date,
             "endDatetime": end_date,
+            "PaginationRequestModel": {"requestRecordsAmount": 1000, "requestPage": 1},
         }
         if progress_list is not None:
             payload["orderProgressList"] = progress_list
         return self._c.post("/order/searchOrder/", json=payload).json()
 
     def get_order(self, order_numbers: list[str]) -> dict:
-        return self._c.post(
-            "/order/getOrder/",
-            json={"orderNumberList": order_numbers, "version": "7"},
-        ).json()
+        all_orders: list[dict] = []
+        for i in range(0, len(order_numbers), 100):
+            chunk = order_numbers[i:i + 100]
+            r = self._c.post(
+                "/order/getOrder/",
+                json={"orderNumberList": chunk, "version": "7"},
+            ).json()
+            all_orders.extend(r.get("OrderModelList", []))
+        return {"OrderModelList": all_orders}
 
 
 class PurchaseItemAPI:
