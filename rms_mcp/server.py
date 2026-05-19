@@ -33,16 +33,17 @@ def _to_rms(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%dT%H:%M:%S+0900")
 
 
+def _i(v) -> int:
+    """Coerce None / missing values to 0 for numeric summing."""
+    return int(v) if v else 0
+
+
 def _fetch_all_orders(api: OrderAPI, start: datetime, end: datetime, progress: list[int] | None) -> list[dict]:
     r = api.search_orders(_to_rms(start), _to_rms(end), date_type=1, progress_list=progress)
     nums = r.get("orderNumberList", [])
     if not nums:
         return []
-    orders = []
-    for i in range(0, len(nums), 50):
-        detail = api.get_order(nums[i : i + 50])
-        orders.extend(detail.get("OrderModelList", []))
-    return orders
+    return api.get_order(nums).get("OrderModelList", [])
 
 
 @server.list_tools()
@@ -102,11 +103,11 @@ async def _daily_sales(args: dict, api: OrderAPI) -> list[TextContent]:
     for o in orders:
         d = o.get("orderDatetime", "")[:10]
         daily[d]["o"] += 1
-        daily[d]["rev"] += o.get("totalPrice", 0)
-        daily[d]["tax"] += o.get("goodsTax", 0)
-        daily[d]["cs"] += o.get("couponShopPrice", 0)
-        daily[d]["co"] += o.get("couponOtherPrice", 0)
-        daily[d]["dlv"] += o.get("deliveryPrice", 0)
+        daily[d]["rev"] += _i(o.get("totalPrice"))
+        daily[d]["tax"] += _i(o.get("goodsTax"))
+        daily[d]["cs"] += _i(o.get("couponShopPrice"))
+        daily[d]["co"] += _i(o.get("couponOtherPrice"))
+        daily[d]["dlv"] += _i(o.get("deliveryPrice"))
 
     lines = [f"# RMS Daily Sales: {start.date()} ~ {end.date()}\n| Date | Orders | Revenue | Tax | Shop Coupon | Delivery |\n|---|---|---|---|---|---|"]
     gt, go = 0, 0
@@ -130,23 +131,46 @@ async def _product_ranking(args: dict, api: OrderAPI) -> list[TextContent]:
     if not orders:
         return [TextContent(type="text", text="No orders found.")]
 
-    ps: dict[str, dict] = defaultdict(lambda: {"n": "", "q": 0, "r": 0})
+    # Allocate each order's totalPrice across its items in proportion to
+    # qty * unit price. This reflects coupon/point-adjusted realized revenue,
+    # which lines up with accounting figures better than raw unit price * qty.
+    ps: dict[str, dict] = defaultdict(lambda: {"n": "", "q": 0, "r": 0, "gross": 0})
     for order in orders:
-        for pkg in order.get("PackageModelList", []):
-            for item in pkg.get("ItemModelList", []):
+        total = _i(order.get("totalPrice"))
+        item_rows: list[tuple[str, str, int, int]] = []
+        gross = 0
+        for pkg in order.get("PackageModelList", []) or []:
+            for item in pkg.get("ItemModelList", []) or []:
                 nm = item.get("itemName", "?")
-                qty = item.get("units", 0)
-                pr = item.get("price", 0)
+                qty = _i(item.get("units"))
+                pr = _i(item.get("price"))
                 key = f"{item.get('itemNumber','')}:{nm}"
-                ps[key]["n"] = nm
-                ps[key]["q"] += qty
-                ps[key]["r"] += qty * pr
+                line = qty * pr
+                item_rows.append((key, nm, qty, line))
+                gross += line
+
+        for key, nm, qty, line in item_rows:
+            ps[key]["n"] = nm
+            ps[key]["q"] += qty
+            ps[key]["gross"] += line
+            # Pro-rate totalPrice by line share. Fall back to gross when
+            # totalPrice or gross is missing (e.g. cancelled orders).
+            if total and gross:
+                ps[key]["r"] += round(total * line / gross)
+            else:
+                ps[key]["r"] += line
 
     ranked = sorted(ps.items(), key=lambda x: x[1]["r"], reverse=True)[:top_n]
-    lines = [f"# RMS Product Ranking: {start.date()} ~ {end.date()}\n| # | Product | Qty | Revenue | Avg |\n|---|---|---|---|---|"]
+    lines = [
+        f"# RMS Product Ranking: {start.date()} ~ {end.date()}",
+        "Revenue = totalPrice pro-rated across items (coupon/point adjusted).",
+        "",
+        "| # | Product | Qty | Revenue | Gross (list) | Avg |",
+        "|---|---|---|---|---|---|",
+    ]
     for i, (_, s) in enumerate(ranked, 1):
         avg = s["r"] // s["q"] if s["q"] else 0
-        lines.append(f"| {i} | {s['n']} | {s['q']} | ¥{s['r']:,} | ¥{avg:,} |")
+        lines.append(f"| {i} | {s['n']} | {s['q']} | ¥{s['r']:,} | ¥{s['gross']:,} | ¥{avg:,} |")
     return [TextContent(type="text", text="\n".join(lines))]
 
 
