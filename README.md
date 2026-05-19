@@ -85,6 +85,15 @@ c.close()
 
 詳しい導入手順は [SETUP.md](SETUP.md) を参照してください。
 
+## 開発・テスト
+
+```bash
+uv sync --extra dev
+uv run pytest                       # ユニット + 統合テスト
+RMS_SERVICE_SECRET=SP_xxx RMS_LICENSE_KEY=SL_xxx \
+  uv run pytest tests/test_live_smoke.py   # 実API疎通
+```
+
 ## License
 
 MIT — ORYZAE Inc.
