@@ -32,7 +32,6 @@ class RMSClient:
             body = r.text[:2000]
             raise RuntimeError(
                 f"RMS API {r.status_code} for {method} {path}\n"
-                f"Auth header: {self._auth[:80]}...\n"
                 f"Response: {body}"
             )
         return r
