@@ -13,6 +13,7 @@ Claude Code から楽天RMSの売上データを取得する導入手順。
 4. [Claude Codeへの組み込み](#claude-codeへの組み込み)
 5. [使い方](#使い方)
 6. [トラブルシューティング](#トラブルシューティング)
+7. [Claude.ai（Web版）から使う場合](#claudeaiweb版から使う場合)
 
 ---
 
@@ -194,10 +195,69 @@ Claude Codeのチャット画面で以下のように話しかけるだけです
 
 ---
 
+## Claude.ai（Web版）から使う場合
+
+ブラウザ版 Claude.ai からも使えるよう、Railway にリモートサーバーを公開しています。
+**Claude.ai Pro / Team / Enterprise プランが必要**です。
+
+### Step 1: 管理者から接続情報を受け取る
+
+Slack #tech で「rms-mcp のClaude.ai接続情報ください」と依頼してください。
+
+- サーバーURL（例: `https://rms-mcp.up.railway.app/mcp/`）
+- Bearer トークン
+
+### Step 2: Claude.ai に Custom Connector として登録
+
+1. https://claude.ai/ にログイン
+2. 右上のプロフィール → **Settings** → **Connectors**
+3. **Add custom connector** をクリック
+4. 以下を入力:
+   - Name: `Rakuten RMS`
+   - Remote MCP server URL: 受け取ったURL
+   - Authentication: `Bearer Token`
+   - Token: 受け取ったトークン
+5. **Add** で保存
+
+### Step 3: チャットで利用
+
+新しいチャットを開き、画面下部のツールアイコンから `Rakuten RMS` を有効化。
+あとは Claude Code と同じ自然言語で使えます。
+
+### サーバー管理者向け（Railway デプロイ手順）
+
+社内で初めて立ち上げる場合の手順:
+
+```bash
+# 1. Railway CLI インストール
+brew install railway
+
+# 2. ログイン & プロジェクト作成
+railway login
+railway init    # rms-mcp ディレクトリで
+
+# 3. 環境変数設定
+railway variables set RMS_MCP_TRANSPORT=http
+railway variables set RMS_SERVICE_SECRET=SP404839_xxx
+railway variables set RMS_LICENSE_KEY=SL404839_xxx
+railway variables set RMS_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+
+# 4. デプロイ
+railway up
+
+# 5. パブリックドメイン発行
+railway domain
+```
+
+トークンローテーション時は `RMS_MCP_AUTH_TOKEN` を再生成して `railway up` で再デプロイ、
+社内メンバー全員に新トークンを Slack DM で配布してください。
+
+---
+
 ## 📞 問い合わせ
 
 導入で詰まったら Slack #tech チャンネルで質問してください。
 
 ---
 
-最終更新: 2026-05-08
+最終更新: 2026-05-19
