@@ -101,7 +101,9 @@ def build_app(mcp_server: Server) -> Starlette:
             Route("/oauth/authorize", oauth.authorize_post, methods=["POST"]),
             Route("/oauth/token", oauth.token_endpoint, methods=["POST"]),
 
-            # MCP
+            # MCP — accept both /mcp and /mcp/ to avoid 307 redirects that
+            # strip Authorization headers on POST.
+            Mount("/mcp/", app=handle_mcp),
             Mount("/mcp", app=handle_mcp),
         ],
         middleware=[Middleware(OAuthBearerMiddleware)],
