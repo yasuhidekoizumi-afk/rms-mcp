@@ -1,13 +1,14 @@
-"""Streamable HTTP transport with Bearer-token auth for Claude.ai connector.
+"""Streamable HTTP transport with OAuth 2.0 (PKCE) for Claude.ai connector.
 
-Auth model: a single shared secret in RMS_MCP_AUTH_TOKEN.
-Clients (Claude.ai connector) send `Authorization: Bearer <token>`.
+Auth model: OAuth 2.0 Authorization Code + PKCE per MCP spec.
+- Claude.ai dynamically registers as a client (/oauth/register).
+- User visits /oauth/authorize, enters a shared passcode, gets an auth code.
+- Claude.ai exchanges the code for an access token at /oauth/token.
+- All /mcp/* requests require Authorization: Bearer <access_token>.
 
-This is intentionally simple - the server is deployed for a small internal
-team (2-3 users). When the user list grows beyond that, replace with OAuth.
+Designed for a 2-3 person internal team. See oauth.py for details.
 """
 import contextlib
-import os
 from collections.abc import AsyncIterator
 
 from mcp.server.lowlevel import Server
@@ -19,49 +20,50 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse
 from starlette.routing import Mount, Route
 
+from rms_mcp import oauth
 
-class BearerAuthMiddleware(BaseHTTPMiddleware):
-    """Reject requests without a valid Bearer token.
 
-    The /health endpoint is exempt so platform health checks can hit it.
-    """
+# Paths that bypass the bearer check (OAuth flow itself + health).
+PUBLIC_PATHS = {
+    "/health",
+    "/.well-known/oauth-authorization-server",
+    "/.well-known/oauth-protected-resource",
+    "/oauth/register",
+    "/oauth/authorize",
+    "/oauth/token",
+}
 
-    def __init__(self, app, token: str | None):
-        super().__init__(app)
-        self._token = token
+
+class OAuthBearerMiddleware(BaseHTTPMiddleware):
+    """Enforce Bearer auth on protected paths; let OAuth/health pass through."""
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/health":
+        path = request.url.path
+        if path in PUBLIC_PATHS or path.startswith("/oauth/"):
             return await call_next(request)
-
-        if not self._token:
-            return JSONResponse(
-                {"error": "Server misconfigured: RMS_MCP_AUTH_TOKEN unset"},
-                status_code=503,
-            )
 
         auth = request.headers.get("authorization", "")
         if not auth.startswith("Bearer "):
             return JSONResponse(
                 {"error": "Missing Bearer token"},
                 status_code=401,
-                headers={"WWW-Authenticate": 'Bearer realm="rms-mcp"'},
+                headers={
+                    "WWW-Authenticate":
+                        'Bearer resource_metadata="/.well-known/oauth-protected-resource"',
+                },
             )
-        presented = auth[len("Bearer "):].strip()
-        if not _constant_time_eq(presented, self._token):
-            return JSONResponse({"error": "Invalid token"}, status_code=401)
-
+        token = auth[len("Bearer "):].strip()
+        if not oauth.validate_bearer(token):
+            return JSONResponse(
+                {"error": "Invalid or expired token"},
+                status_code=401,
+                headers={
+                    "WWW-Authenticate":
+                        'Bearer error="invalid_token", '
+                        'resource_metadata="/.well-known/oauth-protected-resource"',
+                },
+            )
         return await call_next(request)
-
-
-def _constant_time_eq(a: str, b: str) -> bool:
-    """Constant-time string comparison to avoid timing leaks."""
-    if len(a) != len(b):
-        return False
-    result = 0
-    for x, y in zip(a, b):
-        result |= ord(x) ^ ord(y)
-    return result == 0
 
 
 async def _health(_: Request) -> PlainTextResponse:
@@ -70,11 +72,9 @@ async def _health(_: Request) -> PlainTextResponse:
 
 def build_app(mcp_server: Server) -> Starlette:
     """Build a Starlette ASGI app that serves the MCP server over HTTP."""
-    token = os.environ.get("RMS_MCP_AUTH_TOKEN")
-
     session_manager = StreamableHTTPSessionManager(
         app=mcp_server,
-        stateless=True,  # Each request is independent; no per-session state.
+        stateless=True,
     )
 
     async def handle_mcp(scope, receive, send):
@@ -88,8 +88,22 @@ def build_app(mcp_server: Server) -> Starlette:
     return Starlette(
         routes=[
             Route("/health", _health, methods=["GET"]),
+
+            # OAuth metadata
+            Route("/.well-known/oauth-authorization-server",
+                  oauth.oauth_authorization_server_metadata, methods=["GET"]),
+            Route("/.well-known/oauth-protected-resource",
+                  oauth.oauth_protected_resource_metadata, methods=["GET"]),
+
+            # OAuth flow
+            Route("/oauth/register", oauth.register_client, methods=["POST"]),
+            Route("/oauth/authorize", oauth.authorize_get, methods=["GET"]),
+            Route("/oauth/authorize", oauth.authorize_post, methods=["POST"]),
+            Route("/oauth/token", oauth.token_endpoint, methods=["POST"]),
+
+            # MCP
             Mount("/mcp", app=handle_mcp),
         ],
-        middleware=[Middleware(BearerAuthMiddleware, token=token)],
+        middleware=[Middleware(OAuthBearerMiddleware)],
         lifespan=lifespan,
     )

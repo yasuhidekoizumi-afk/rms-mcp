@@ -200,29 +200,41 @@ Claude Codeのチャット画面で以下のように話しかけるだけです
 ブラウザ版 Claude.ai からも使えるよう、Railway にリモートサーバーを公開しています。
 **Claude.ai Pro / Team / Enterprise プランが必要**です。
 
-### Step 1: 管理者から接続情報を受け取る
+認証は OAuth 2.0 + PKCE。Claude.ai 側でログイン画面（共有パスコード入力）を経由します。
 
-Slack #tech で「rms-mcp のClaude.ai接続情報ください」と依頼してください。
+### Step 1: 管理者から共有パスコードを受け取る
 
-- サーバーURL（例: `https://rms-mcp.up.railway.app/mcp/`）
-- Bearer トークン
+Slack #tech で「rms-mcp のClaude.ai接続情報ください」と依頼してください。受け取るもの:
+
+- サーバーURL（例: `https://rms-mcp-production.up.railway.app/mcp/`）
+- **共有パスコード**（OAuth認可画面で入力するワンタイム的な合言葉）
 
 ### Step 2: Claude.ai に Custom Connector として登録
 
 1. https://claude.ai/ にログイン
-2. 右上のプロフィール → **Settings** → **Connectors**
-3. **Add custom connector** をクリック
-4. 以下を入力:
+2. 右上プロフィール → **Settings** → **Connectors** → **Add custom connector**
+3. 以下を入力:
    - Name: `Rakuten RMS`
    - Remote MCP server URL: 受け取ったURL
-   - Authentication: `Bearer Token`
-   - Token: 受け取ったトークン
-5. **Add** で保存
+   - 詳細設定の OAuth Client ID / Secret は **空のまま** でOK
+4. **追加** をクリック
 
-### Step 3: チャットで利用
+### Step 3: 認可画面でパスコード入力
 
-新しいチャットを開き、画面下部のツールアイコンから `Rakuten RMS` を有効化。
+「追加」直後、Claude.ai が自動でOAuthフローを開始し、別タブで認可画面が開きます。
+
+1. 共有パスコードを入力
+2. **許可する** をクリック
+3. 自動でClaude.aiに戻り、コネクタが「接続済み」になる
+
+### Step 4: チャットで利用
+
+新規チャットの画面下部ツールアイコンから `Rakuten RMS` を有効化。
 あとは Claude Code と同じ自然言語で使えます。
+
+> アクセストークンは30日間有効。期限切れ時は再度パスコード入力を求められます。
+
+---
 
 ### サーバー管理者向け（Railway デプロイ手順）
 
@@ -234,23 +246,31 @@ brew install railway
 
 # 2. ログイン & プロジェクト作成
 railway login
-railway init    # rms-mcp ディレクトリで
+cd ~/oryzae/rms-mcp
+railway init
 
-# 3. 環境変数設定
-railway variables set RMS_MCP_TRANSPORT=http
-railway variables set RMS_SERVICE_SECRET=SP404839_xxx
-railway variables set RMS_LICENSE_KEY=SL404839_xxx
-railway variables set RMS_MCP_AUTH_TOKEN=$(openssl rand -hex 32)
+# 3. サービスをリンク
+railway service     # 作成されたサービスを選択
 
-# 4. デプロイ
+# 4. 環境変数設定
+railway variables --set "RMS_MCP_TRANSPORT=http"
+railway variables --set "RMS_SERVICE_SECRET=SP404839_xxx"
+railway variables --set "RMS_LICENSE_KEY=SL404839_xxx"
+railway variables --set "RMS_MCP_OAUTH_PASSCODE=$(openssl rand -hex 12)"
+
+# 5. デプロイ
 railway up
 
-# 5. パブリックドメイン発行
+# 6. パブリックドメイン発行
 railway domain
+
+# 7. パスコードを確認して社内メンバーに配布
+railway variables --kv | grep RMS_MCP_OAUTH_PASSCODE
 ```
 
-トークンローテーション時は `RMS_MCP_AUTH_TOKEN` を再生成して `railway up` で再デプロイ、
-社内メンバー全員に新トークンを Slack DM で配布してください。
+**トークンローテーション**: アクセストークンは30日で自動失効するので通常不要。
+パスコードを変えたい場合は `RMS_MCP_OAUTH_PASSCODE` を再設定 → `railway up` で再デプロイ。
+既存のアクセストークンも全て無効化されます（サーバー再起動でメモリ消去）。
 
 ---
 
