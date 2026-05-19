@@ -281,6 +281,19 @@ def test_mcp_rejects_missing_auth(app):
     assert "Bearer" in r.headers.get("www-authenticate", "")
 
 
+def test_mcp_no_trailing_slash_does_not_redirect(app):
+    """Claude.ai posts to /mcp without trailing slash; must not 307."""
+    with TestClient(app) as client:
+        r = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+            follow_redirects=False,
+        )
+    # Should be 401 (auth required) — not 307 redirect
+    assert r.status_code != 307
+    assert r.status_code == 401
+
+
 def test_mcp_rejects_invalid_token(app):
     with TestClient(app) as client:
         r = client.post(
