@@ -214,8 +214,15 @@ async def _run_stdio():
 
 def _run_http():
     """Run the MCP server over Streamable HTTP, behind a Bearer-token guard."""
+    import logging
     import uvicorn
     from rms_mcp.http_app import build_app
+    from rms_mcp.smoke import run_startup_smoke_test
+
+    # Make sure smoke test logs appear before uvicorn takes over the stream.
+    logging.basicConfig(level=logging.INFO,
+                        format="%(levelname)s: %(message)s")
+    run_startup_smoke_test()
 
     port = int(os.environ.get("PORT", "8000"))
     app = build_app(server)
