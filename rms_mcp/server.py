@@ -194,13 +194,32 @@ async def _cancel_rate(args: dict, api: OrderAPI) -> list[TextContent]:
 
 
 def main():
+    """CLI entry point. Picks transport based on RMS_MCP_TRANSPORT env var.
+
+    - "stdio" (default): local Claude Code use
+    - "http": remote Claude.ai use; serves on $PORT (default 8000)
+    """
     import asyncio
-    asyncio.run(_run())
+    transport = os.environ.get("RMS_MCP_TRANSPORT", "stdio").lower()
+    if transport == "http":
+        _run_http()
+    else:
+        asyncio.run(_run_stdio())
 
 
-async def _run():
+async def _run_stdio():
     async with stdio_server() as (reader, writer):
         await server.run(reader, writer, server.create_initialization_options())
+
+
+def _run_http():
+    """Run the MCP server over Streamable HTTP, behind a Bearer-token guard."""
+    import uvicorn
+    from rms_mcp.http_app import build_app
+
+    port = int(os.environ.get("PORT", "8000"))
+    app = build_app(server)
+    uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
 
 
 if __name__ == "__main__":
