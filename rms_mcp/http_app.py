@@ -66,6 +66,29 @@ class OAuthBearerMiddleware(BaseHTTPMiddleware):
         return await call_next(request)
 
 
+class McpPathNormalizer:
+    """ASGI middleware: rewrite incoming path /mcp → /mcp/ before routing.
+
+    Claude.ai (and some other MCP clients) POST to /mcp without a trailing
+    slash. Starlette's default behavior is to 307-redirect to /mcp/, but
+    POST redirects strip the Authorization header on most clients, causing
+    the OAuth flow to appear successful while the actual MCP call fails.
+
+    Rewriting at the ASGI layer is safer than registering both /mcp and
+    /mcp/ mounts, because Starlette's internal routing within the mounted
+    sub-app also emits the 307.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] == "http" and scope.get("path") == "/mcp":
+            # Mutate the scope path before downstream routing sees it.
+            scope = {**scope, "path": "/mcp/", "raw_path": b"/mcp/"}
+        await self.app(scope, receive, send)
+
+
 async def _health(_: Request) -> PlainTextResponse:
     return PlainTextResponse("ok")
 
@@ -101,11 +124,14 @@ def build_app(mcp_server: Server) -> Starlette:
             Route("/oauth/authorize", oauth.authorize_post, methods=["POST"]),
             Route("/oauth/token", oauth.token_endpoint, methods=["POST"]),
 
-            # MCP — accept both /mcp and /mcp/ to avoid 307 redirects that
-            # strip Authorization headers on POST.
+            # MCP
             Mount("/mcp/", app=handle_mcp),
-            Mount("/mcp", app=handle_mcp),
         ],
-        middleware=[Middleware(OAuthBearerMiddleware)],
+        middleware=[
+            # Path normalizer runs first (outermost), so auth middleware sees
+            # the canonical /mcp/ path.
+            Middleware(McpPathNormalizer),
+            Middleware(OAuthBearerMiddleware),
+        ],
         lifespan=lifespan,
     )

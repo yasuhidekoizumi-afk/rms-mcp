@@ -294,6 +294,26 @@ def test_mcp_no_trailing_slash_does_not_redirect(app):
     assert r.status_code == 401
 
 
+def test_mcp_no_trailing_slash_with_auth_no_redirect(app):
+    """With a valid token, /mcp (no slash) must reach the MCP handler, not 307."""
+    with TestClient(app) as client:
+        token, _ = _full_flow(client)
+        r = client.post(
+            "/mcp",
+            json={"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                  "params": {"protocolVersion": "2025-03-26",
+                             "capabilities": {},
+                             "clientInfo": {"name": "test", "version": "1"}}},
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/json, text/event-stream",
+            },
+            follow_redirects=False,
+        )
+    assert r.status_code != 307
+    assert r.status_code == 200
+
+
 def test_mcp_rejects_invalid_token(app):
     with TestClient(app) as client:
         r = client.post(
