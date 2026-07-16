@@ -33,7 +33,7 @@ class RMSClient:
         self._auth = f"ESA {auth_bytes.decode()}"
         self._client = httpx.Client(
             base_url=REST_BASE,
-            timeout=30.0,
+            timeout=60.0,
             headers={"Content-Type": "application/json; charset=utf-8"},
         )
 
@@ -84,6 +84,15 @@ class RMSClient:
 
     def post(self, path: str, **kw):
         return self.request("POST", path, **kw)
+
+    def put(self, path: str, **kw):
+        return self.request("PUT", path, **kw)
+
+    def patch(self, path: str, **kw):
+        return self.request("PATCH", path, **kw)
+
+    def delete(self, path: str, **kw):
+        return self.request("DELETE", path, **kw)
 
     def close(self) -> None:
         self._client.close()
