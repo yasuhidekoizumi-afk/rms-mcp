@@ -3,23 +3,30 @@
 This is intentionally simple — designed for a 2-3 person internal team:
 - Single shared passcode (RMS_MCP_OAUTH_PASSCODE) gates the authorize page.
 - Dynamic Client Registration accepts any client (no whitelist).
-- Tokens stored in memory (lost on restart; users re-authorize).
+- Tokens persisted to disk (RMS_MCP_OAUTH_STORE_PATH) so they survive restarts.
 - Access tokens are long-lived (30 days) since this is internal.
 
-For wider deployment, replace the in-memory store with Redis and add a
+For wider deployment, replace the file store with Redis and add a
 proper login flow.
 """
 import hashlib
 import hmac
+import json
+import logging
 import os
 import secrets
+import tempfile
+import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse
+
+logger = logging.getLogger(__name__)
 
 # Token lifetimes
 ACCESS_TOKEN_TTL = 30 * 24 * 3600   # 30 days
@@ -48,14 +55,88 @@ class AccessToken:
 
 @dataclass
 class OAuthStore:
-    """In-memory storage. Resets on server restart."""
+    """Token store with optional disk persistence."""
     clients: dict[str, dict] = field(default_factory=dict)
     auth_codes: dict[str, AuthCode] = field(default_factory=dict)
     access_tokens: dict[str, AccessToken] = field(default_factory=dict)
 
 
-# Single process-wide store
+# Single process-wide store + persistence
 _store = OAuthStore()
+_persist_lock = threading.Lock()
+_store_path: Path | None = None
+
+
+def _init_persistence():
+    """Load from disk if RMS_MCP_OAUTH_STORE_PATH is set."""
+    global _store_path
+    raw = os.environ.get("RMS_MCP_OAUTH_STORE_PATH")
+    if not raw:
+        return
+    _store_path = Path(raw)
+    _load_from_disk()
+
+
+def _load_from_disk():
+    """Load clients and access_tokens from the JSON file."""
+    if not _store_path or not _store_path.exists():
+        return
+    try:
+        data = json.loads(_store_path.read_text())
+        now = time.time()
+        for cid, cdata in data.get("clients", {}).items():
+            _store.clients[cid] = cdata
+        for tok, tokdata in data.get("access_tokens", {}).items():
+            if tokdata.get("expires_at", 0) > now:
+                _store.access_tokens[tok] = AccessToken(
+                    token=tok,
+                    client_id=tokdata["client_id"],
+                    scope=tokdata.get("scope", "mcp"),
+                    expires_at=tokdata["expires_at"],
+                )
+        logger.info("oauth: loaded %d clients, %d tokens from %s",
+                     len(_store.clients), len(_store.access_tokens), _store_path)
+    except Exception as e:
+        logger.warning("oauth: failed to load store from %s: %s", _store_path, e)
+
+
+def _save_to_disk():
+    """Persist clients and access_tokens atomically."""
+    if not _store_path:
+        return
+    with _persist_lock:
+        now = time.time()
+        data = {
+            "clients": _store.clients,
+            "access_tokens": {
+                tok: {
+                    "client_id": rec.client_id,
+                    "scope": rec.scope,
+                    "expires_at": rec.expires_at,
+                }
+                for tok, rec in _store.access_tokens.items()
+                if rec.expires_at > now
+            },
+        }
+        _store_path.parent.mkdir(parents=True, exist_ok=True)
+        # Atomic write: temp file → rename
+        fd, tmp = tempfile.mkstemp(
+            dir=str(_store_path.parent), suffix=".tmp", prefix=".oauth_"
+        )
+        try:
+            with os.fdopen(fd, "w") as f:
+                json.dump(data, f)
+            os.replace(tmp, str(_store_path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+
+
+# Load on import
+_init_persistence()
 
 
 def get_store() -> OAuthStore:
@@ -141,6 +222,7 @@ async def register_client(request: Request) -> JSONResponse:
         "client_name": body.get("client_name", "mcp-client"),
     }
     _store.clients[client_id] = client_record
+    _save_to_disk()
     return JSONResponse(client_record, status_code=201)
 
 
@@ -302,6 +384,7 @@ async def token_endpoint(request: Request) -> JSONResponse:
         scope=ac.scope,
         expires_at=time.time() + ACCESS_TOKEN_TTL,
     )
+    _save_to_disk()
     return JSONResponse({
         "access_token": token,
         "token_type": "Bearer",
@@ -330,7 +413,11 @@ def _constant_time_eq(a: str, b: str) -> bool:
 
 def reset_store_for_tests() -> None:
     """Test helper: wipe in-memory state."""
+    global _store_path
+    saved = _store_path
+    _store_path = None  # prevent disk writes during test cleanup
     _store.clients.clear()
     _store.auth_codes.clear()
     _store.access_tokens.clear()
     _pending_auth.clear()
+    _store_path = saved
