@@ -61,7 +61,7 @@ def _logiless_get_shipped(client: LogilessClient, date_from: str, date_to: str) 
     page = 1
     while True:
         params["page"] = page
-        r = client.get("/shipments", params=params)
+        r = client.get("/outbound_deliveries", params=params)
         r.raise_for_status()
         data = r.json()
         shipments = data.get("data", [])
@@ -81,6 +81,10 @@ def _build_shipping_payload(shipment: dict) -> dict | None:
     sales_order = shipment.get("sales_order", {})
     order_number = sales_order.get("code")
     if not order_number:
+        return None
+
+    # 楽天市場の注文番号のみ対象（404839-で始まる）
+    if not order_number.startswith("404839-"):
         return None
 
     tracking_numbers = shipment.get("delivery_tracking_numbers", [])

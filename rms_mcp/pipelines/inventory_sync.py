@@ -59,7 +59,7 @@ def _logiless_get_all_inventory(client: LogilessClient) -> dict[str, int]:
     all_stock: dict[str, int] = {}
     page = 1
     while True:
-        r = client.get("/inventory", params={"page": page, "per_page": 100})
+        r = client.get("/logical_inventory_summaries", params={"page": page, "per_page": 100})
         r.raise_for_status()
         data = r.json()
         items = data.get("data", [])
@@ -159,9 +159,12 @@ def sync_inventory(rms_secret: str, rms_license: str,
 
         if rms_info:
             rms_qty = max(0, stock - buffer)
+            # rms_sku_map uses "manageNumber" key, manual_map also uses "manageNumber"
+            mn = rms_info.get("manageNumber", rms_info.get("itemUrl", ""))
+            vid = rms_info.get("variantId", "")
             updates.append({
-                "itemUrl": rms_info["manageNumber"],
-                "variantId": rms_info["variantId"],
+                "itemUrl": mn,
+                "variantId": vid,
                 "quantity": rms_qty,
                 "logiless_stock": stock,
                 "sku": sku,
