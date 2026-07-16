@@ -31,6 +31,7 @@ import httpx
 from rms_mcp.client import RMSClient
 from rms_mcp.item_api import ItemAPI
 from rms_mcp.inventory_api import InventoryAPI
+from rms_mcp.pipelines.logiless_client import LogilessClient
 
 JST_TIMESTAMP_FMT = "%Y-%m-%dT%H:%M:%S+0900"
 LOGILESS_BASE = "https://api.logiless.com/v1"
@@ -53,16 +54,23 @@ def _logiless_get_inventory(api_key: str, page: int = 1, per_page: int = 100) ->
     return r.json()
 
 
-def _logiless_get_all_inventory(api_key: str) -> dict[str, int]:
+def _logiless_get_all_inventory(client: LogilessClient) -> dict[str, int]:
     """全ページ取得して {article_code: stock} のdictを返す."""
     all_stock: dict[str, int] = {}
     page = 1
     while True:
-        data = _logiless_get_inventory(api_key, page=page)
+        r = client.get("/inventory", params={"page": page, "per_page": 100})
+        r.raise_for_status()
+        data = r.json()
         items = data.get("data", [])
         for item in items:
-            code = item.get("article_code", "")
-            stock = item.get("available_quantity", item.get("quantity", 0))
+            # 商品（attr6=商品/単品）のみ対象。資材・同梱物はスキップ
+            article = item.get("article", {})
+            attr6 = article.get("attr6", "")
+            if attr6 not in ("商品", "単品"):
+                continue
+            code = article.get("code", "")
+            stock = item.get("available", item.get("free", 0))
             if code:
                 all_stock[code] = int(stock) if stock else 0
 
@@ -102,9 +110,10 @@ def _build_inventory_map(rms_secret: str, rms_license: str) -> dict[str, dict]:
     return sku_map
 
 
-def sync_inventory(rms_secret: str, rms_license: str, logiless_api_key: str,
-                   buffer: int = DEFAULT_BUFFER,
-                   dry_run: bool = False) -> dict:
+def sync_inventory(rms_secret: str, rms_license: str,
+                  logiless_client: LogilessClient | None = None,
+                  buffer: int = DEFAULT_BUFFER,
+                  dry_run: bool = False) -> dict:
     """在庫同期のメイン処理.
 
     Returns: {matched, updated, skipped, errors}
@@ -113,7 +122,9 @@ def sync_inventory(rms_secret: str, rms_license: str, logiless_api_key: str,
 
     # 1. Logiless在庫を取得
     try:
-        logiless_stock = _logiless_get_all_inventory(logiless_api_key)
+        if not logiless_client:
+            logiless_client = LogilessClient()
+        logiless_stock = _logiless_get_all_inventory(logiless_client)
     except Exception as e:
         return {"error": f"Logiless API error: {e}", "matched": 0}
 
@@ -222,7 +233,6 @@ def sync_inventory(rms_secret: str, rms_license: str, logiless_api_key: str,
 if __name__ == "__main__":
     rms_ss = os.environ.get("RMS_SERVICE_SECRET", "")
     rms_lk = os.environ.get("RMS_LICENSE_KEY", "")
-    logiless_key = os.environ.get("LOGILESS_API_KEY", "")
 
     if not all([rms_ss, rms_lk]):
         print("ERROR: RMS_SERVICE_SECRET and RMS_LICENSE_KEY required")
@@ -230,5 +240,5 @@ if __name__ == "__main__":
 
     dry_run = "--dry-run" in sys.argv
 
-    result = sync_inventory(rms_ss, rms_lk, logiless_key, dry_run=dry_run)
+    result = sync_inventory(rms_ss, rms_lk, dry_run=dry_run)
     print(json.dumps(result, ensure_ascii=False, indent=2))

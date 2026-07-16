@@ -31,6 +31,7 @@ import httpx
 
 from rms_mcp.client import RMSClient
 from rms_mcp.order_api import OrderAPI
+from rms_mcp.pipelines.logiless_client import LogilessClient
 
 JST = ZoneInfo("Asia/Tokyo")
 LOGILESS_BASE = "https://api.logiless.com/v1"
@@ -48,9 +49,8 @@ DELIVERY_METHOD_MAP: dict[str, dict] = {
 }
 
 
-def _logiless_get_shipped(api_key: str, date_from: str, date_to: str) -> list[dict]:
+def _logiless_get_shipped(client: LogilessClient, date_from: str, date_to: str) -> list[dict]:
     """Logiless API で Shipped ステータスの出荷を取得."""
-    headers = {"Authorization": f"Bearer {api_key}"}
     params = {
         "date_from": date_from,
         "date_to": date_to,
@@ -61,12 +61,7 @@ def _logiless_get_shipped(api_key: str, date_from: str, date_to: str) -> list[di
     page = 1
     while True:
         params["page"] = page
-        r = httpx.get(
-            f"{LOGILESS_BASE}/shipments",
-            headers=headers,
-            params=params,
-            timeout=30.0,
-        )
+        r = client.get("/shipments", params=params)
         r.raise_for_status()
         data = r.json()
         shipments = data.get("data", [])
@@ -111,7 +106,8 @@ def _build_shipping_payload(shipment: dict) -> dict | None:
     }
 
 
-def sync_shipping(rms_secret: str, rms_license: str, logiless_api_key: str,
+def sync_shipping(rms_secret: str, rms_license: str,
+                  logiless_client: LogilessClient | None = None,
                   date_from: str | None = None, date_to: str | None = None,
                   dry_run: bool = False) -> dict:
     """出荷同期のメイン処理.
@@ -128,7 +124,9 @@ def sync_shipping(rms_secret: str, rms_license: str, logiless_api_key: str,
 
     # 1. Logiless から出荷済みデータを取得
     try:
-        shipments = _logiless_get_shipped(logiless_api_key, date_from, date_to)
+        if not logiless_client:
+            logiless_client = LogilessClient()
+        shipments = _logiless_get_shipped(logiless_client, date_from, date_to)
     except Exception as e:
         return {"error": f"Logiless API error: {e}", "processed": 0}
 
@@ -209,7 +207,6 @@ def sync_shipping(rms_secret: str, rms_license: str, logiless_api_key: str,
 if __name__ == "__main__":
     rms_ss = os.environ.get("RMS_SERVICE_SECRET", "")
     rms_lk = os.environ.get("RMS_LICENSE_KEY", "")
-    logiless_key = os.environ.get("LOGILESS_API_KEY", "")
 
     if not all([rms_ss, rms_lk]):
         print("ERROR: RMS_SERVICE_SECRET and RMS_LICENSE_KEY required")
@@ -217,5 +214,5 @@ if __name__ == "__main__":
 
     dry_run = "--dry-run" in sys.argv
 
-    result = sync_shipping(rms_ss, rms_lk, logiless_key, dry_run=dry_run)
+    result = sync_shipping(rms_ss, rms_lk, dry_run=dry_run)
     print(json.dumps(result, ensure_ascii=False, indent=2))
