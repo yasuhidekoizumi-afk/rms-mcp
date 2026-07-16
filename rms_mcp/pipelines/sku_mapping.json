@@ -1,0 +1,29 @@
+{
+  "_description": "Logiless article_code → RMS {manageNumber, variantId} のマッピングテーブル",
+  "_generated": "2026-07-17",
+  "_note": "自動マッチしなかった商品の手動マッピング。LogilessのJANコード(14桁)はRMSのmerchantDefinedSkuIdと一致しないため、商品名から推測してマッピング。未知の商品はスキップされる。",
+
+  "mappings": {
+    "2000226041830": {"manageNumber": "10000008", "variantId": "sour-soy-180", "name": "米麹ソース｜SOY 醤油180g"},
+    "2000226041847": {"manageNumber": "sour-salt-180", "variantId": "sour-salt-180", "name": "米麹ソース｜SALT 塩180g"},
+    "2000226041854": {"manageNumber": "10000009", "variantId": "sour-aman-180", "name": "米麹ソース｜SWEET 甘180g"},
+
+    "oats-crunch-choco-40": {"manageNumber": "10000017", "variantId": "oats-crunch-choco-40", "name": "オートミールクランチ チョコ40g"},
+    "oats-crunch-plain-40": {"manageNumber": "10000018", "variantId": "oats-crunch-plain-40", "name": "オートミールクランチ プレーン40g"},
+
+    "2000303804815": {"manageNumber": "10000017", "variantId": "oats-crunch-choco-6set", "name": "オートミールクランチ6袋｜チョコ40g"},
+    "2000303804846": {"manageNumber": "10000018", "variantId": "oats-crunch-plain-3set", "name": "オートミールクランチ3袋｜プレーン40g"},
+
+    "2set-aca-aca-200": {"manageNumber": "seasonal_products", "variantId": "acai_2set", "name": "アサイー 2個セット"},
+    "2set-aca-hon-200": {"manageNumber": "seasonal_products", "variantId": "acai_honey_2set", "name": "グラノーラ2種（アサイー・ハニーレモン）"},
+    "2set-hon-hon-200": {"manageNumber": "seasonal_products", "variantId": "honey_2set", "name": "ハニーレモンオレンジ 2個セット"},
+    "2set-man-man-200": {"manageNumber": "seasonal_products", "variantId": "mango_2set", "name": "マンゴー 2個セット"},
+
+    "3set-cho-cho-cho-180": {"manageNumber": "10000010", "variantId": "3set-cho-cho-cho-180", "name": "チョコソース3本セット"},
+
+    "3set-aca-aca-man-200": {"manageNumber": "seasonal_products", "variantId": "acai_acai_mango_3set", "name": "グラノーラ3種（アサイー×2・マンゴー）"},
+    "3set-aca-man-man-200": {"manageNumber": "seasonal_products", "variantId": "acai_mango_mango_3set", "name": "グラノーラ3種（アサイー・マンゴー×2）"},
+    "3set-man-man-hon-200": {"manageNumber": "seasonal_products", "variantId": "mango_mango_honey_3set", "name": "グラノーラ3種（マンゴー×2・ハニーレモン）"},
+    "3set-man-man-man-200": {"manageNumber": "seasonal_products", "variantId": "mango_3set", "name": "グラノーラ｜マンゴー200g×3個"}
+  }
+}

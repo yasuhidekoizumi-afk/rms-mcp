@@ -129,12 +129,28 @@ def sync_inventory(rms_secret: str, rms_license: str, logiless_api_key: str,
     unmatched_logiless: list[str] = []
     unmatched_rms: list[str] = []
 
+    # 手動マッピングテーブルを読み込み
+    import pathlib
+    mapping_file = pathlib.Path(__file__).parent / "sku_mapping.json"
+    manual_map: dict[str, dict] = {}
+    if mapping_file.exists():
+        import json as _json
+        manual_map = _json.loads(mapping_file.read_text()).get("mappings", {})
+
     for sku, stock in logiless_stock.items():
+        rms_info = None
+        # 1. 自動マッチ（merchantDefinedSkuId == Logiless article.code）
         if sku in rms_sku_map:
+            rms_info = rms_sku_map[sku]
+        # 2. 手動マッピングテーブル
+        elif sku in manual_map:
+            rms_info = manual_map[sku]
+
+        if rms_info:
             rms_qty = max(0, stock - buffer)
             updates.append({
-                "itemUrl": rms_sku_map[sku]["itemUrl"],
-                "variantId": rms_sku_map[sku]["variantId"],
+                "itemUrl": rms_info["manageNumber"],
+                "variantId": rms_info["variantId"],
                 "quantity": rms_qty,
                 "logiless_stock": stock,
                 "sku": sku,
