@@ -12,6 +12,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.23.0", "respx>=0.21.0"]
+browser = ["playwright"]
 
 [project.scripts]
 rms-mcp = "rms_mcp.server:main"
