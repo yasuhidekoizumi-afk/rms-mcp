@@ -1,21 +1,24 @@
-"""ItemAPI 2.0 wrapper — 商品の検索・取得・登録・更新・削除."""
+"""ItemAPI 2.0 wrapper — 商品の検索・取得・登録・更新・削除.
+
+正しいエンドポイントURL（JakeJP/Rakuten.RMS.Api ソースコードから確認）:
+
+  GET    /es/2.0/items/search?searchType=&offset=         — 商品検索（10件/ページ固定）
+  GET    /es/2.0/items/manage-numbers/{manageNumber}       — 個別商品取得
+  PUT    /es/2.0/items/manage-numbers/{manageNumber}       — 商品登録・更新 (upsert)
+  PATCH  /es/2.0/items/manage-numbers/{manageNumber}       — 部分更新
+  DELETE /es/2.0/items/manage-numbers/{manageNumber}       — 削除
+  POST   /es/2.0/items/bulk-get                            — 一括取得
+"""
 from typing import Any
 
 from rms_mcp.client import RMSClient
 
 SEARCH_PAGE_SIZE = 10  # RMS ItemAPI 2.0 はpageSize指定不可（常に10件/ページ）
+REST_BASE = "https://api.rms.rakuten.co.jp/es/2.0"
 
 
 class ItemAPI:
-    """楽天 RMS ItemAPI 2.0 ラッパー.
-
-    ItemAPIはRESTful設計で、HTTPメソッドが操作に対応する:
-      GET    /items/search/  — 商品検索（offset ベースのページネーション、10件/ページ固定）
-      GET    /items/{manageNumber}/ — 個別商品取得
-      PUT    /items/         — 商品登録・更新 (upsert)
-      PATCH  /items/{manageNumber}/ — 部分更新
-      DELETE /items/{manageNumber}/ — 削除
-    """
+    """楽天 RMS ItemAPI 2.0 ラッパー."""
 
     def __init__(self, client: RMSClient):
         self._c = client
@@ -63,9 +66,17 @@ class ItemAPI:
 
     def get(self, manage_number: str) -> dict:
         """個別商品取得（管理番号で指定）."""
-        return self._c.get(f"/items/{manage_number}/").json()
+        url = f"{REST_BASE}/items/manage-numbers/{manage_number}"
+        r = self._c.get(url)
+        return r.json()
 
-    def upsert(self, item_data: dict) -> dict:
+    def bulk_get(self, manage_numbers: list[str]) -> dict:
+        """一括取得."""
+        url = f"{REST_BASE}/items/bulk-get"
+        r = self._c.post(url, json={"manageNumbers": manage_numbers})
+        return r.json()
+
+    def upsert(self, manage_number: str, item_data: dict) -> dict:
         """商品登録・更新 (upsert).
 
         item_dataの主なフィールド:
@@ -83,7 +94,11 @@ class ItemAPI:
             ...
         }
         """
-        return self._c.put("/items/", json=item_data).json()
+        url = f"{REST_BASE}/items/manage-numbers/{manage_number}"
+        r = self._c.put(url, json=item_data)
+        if r.status_code in (200, 204):
+            return {"status": "ok", "manageNumber": manage_number}
+        return r.json()
 
     def patch(self, manage_number: str, patch_data: dict) -> dict:
         """商品部分更新.
@@ -92,10 +107,16 @@ class ItemAPI:
         {"standardPrice": 980}  → 価格のみ更新
         {"salesDescription": "新キャッチコピー"} → 販売説明のみ更新
         """
-        return self._c.patch(
-            f"/items/{manage_number}/", json=patch_data
-        ).json()
+        url = f"{REST_BASE}/items/manage-numbers/{manage_number}"
+        r = self._c.patch(url, json=patch_data)
+        if r.status_code in (200, 204):
+            return {"status": "ok", "manageNumber": manage_number}
+        return r.json()
 
     def delete(self, manage_number: str) -> dict:
         """商品削除."""
-        return self._c.delete(f"/items/{manage_number}/").json()
+        url = f"{REST_BASE}/items/manage-numbers/{manage_number}"
+        r = self._c.delete(url)
+        if r.status_code in (200, 204):
+            return {"status": "deleted"}
+        return r.json()
