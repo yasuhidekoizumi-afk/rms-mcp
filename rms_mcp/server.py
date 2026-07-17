@@ -13,6 +13,7 @@ from rms_mcp.client import RMSClient
 from rms_mcp.order_api import OrderAPI, ACTIVE_PROGRESS
 from rms_mcp.item_api import ItemAPI
 from rms_mcp.inventory_api import InventoryAPI
+from rms_mcp.coupon_api import CouponAPI
 
 JST = ZoneInfo("Asia/Tokyo")
 server = Server("rms-mcp")
@@ -24,7 +25,7 @@ def _get_clients():
     if not ss or not lk:
         raise RuntimeError("Set RMS_SERVICE_SECRET and RMS_LICENSE_KEY env vars")
     c = RMSClient(ss, lk)
-    return c, OrderAPI(c), ItemAPI(c), InventoryAPI(c)
+    return c, OrderAPI(c), ItemAPI(c), InventoryAPI(c), CouponAPI(c)
 
 
 def _now() -> datetime:
@@ -157,6 +158,22 @@ TOOLS = [
                  "required": ["manageNumber", "variantId", "quantity"],
              }},
          }, "required": ["updates"]}),
+
+    # ── クーポン ──
+    Tool(name="rms_search_coupons", description="クーポン検索（発行済みクーポンの一覧）",
+         inputSchema={"type": "object", "properties": {
+             "hits": {"type": "integer", "default": 20},
+             "page": {"type": "integer", "default": 1},
+             "coupon_name": {"type": "string", "description": "クーポン名で絞り込み"},
+         }}),
+
+    # ── 価格変更 ──
+    Tool(name="rms_update_price", description="商品価格を変更（セール価格の設定・復元に使用）",
+         inputSchema={"type": "object", "properties": {
+             "manage_number": {"type": "string", "description": "商品管理番号"},
+             "variant_id": {"type": "string", "description": "バリアントID"},
+             "price": {"type": "integer", "description": "新しい価格（税込）"},
+         }, "required": ["manage_number", "variant_id", "price"]}),
 ]
 
 
@@ -167,7 +184,7 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    c, order_api, item_api, inv_api = _get_clients()
+    c, order_api, item_api, inv_api, coupon_api = _get_clients()
     try:
         if name == "rms_daily_sales":
             return await _daily_sales(arguments, order_api)
@@ -201,6 +218,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _get_inventory(arguments, inv_api)
         elif name == "rms_update_inventory":
             return await _update_inventory(arguments, inv_api)
+        elif name == "rms_search_coupons":
+            return await _search_coupons(arguments, coupon_api)
+        elif name == "rms_update_price":
+            return await _update_price(arguments, item_api)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     finally:
         c.close()
@@ -437,6 +458,36 @@ async def _all_products(args: dict, api: ItemAPI) -> list[TextContent]:
 
 
 # ─── 在庫 ──────────────────────────────────────────────────
+
+async def _search_coupons(args: dict, api: CouponAPI) -> list[TextContent]:
+    r = api.search(
+        hits=args.get("hits", 20),
+        page=args.get("page", 1),
+        coupon_name=args.get("coupon_name"),
+    )
+    coupons = r.get("coupons", [])
+    lines = [f"# クーポン一覧: 全{r.get('allCount', 0)}件中{len(coupons)}件\n| couponCode | name | discount | period | status |\n|---|---|---|---|---|"]
+    for c in coupons:
+        code = c.get("couponCode", "")
+        name = c.get("couponName", "")[:30]
+        dtype = "円引" if c.get("discountType") == "1" else "%引" if c.get("discountType") == "2" else "?"
+        factor = c.get("discountFactor", "")
+        start = c.get("couponStartDate", "")[:10]
+        end = c.get("couponEndDate", "")[:10]
+        status = c.get("couponStatus", "")
+        lines.append(f"| {code} | {name} | {factor}{dtype} | {start}〜{end} | {status} |")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _update_price(args: dict, api: ItemAPI) -> list[TextContent]:
+    """商品価格を変更（PATCH）."""
+    mn = args["manage_number"]
+    vid = args["variant_id"]
+    price = args["price"]
+    result = api.patch(mn, {"variants": {vid: {"standardPrice": str(price)}}})
+    lines = [f"# 価格変更: {mn} / {vid} → ¥{price}"]
+    lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)}\n```")
+    return [TextContent(type="text", text="\n".join(lines))]
 
 async def _get_inventory(args: dict, api: InventoryAPI) -> list[TextContent]:
     """指定商品の全バリアントの在庫を取得."""
