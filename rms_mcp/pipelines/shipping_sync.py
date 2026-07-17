@@ -33,14 +33,15 @@ from rms_mcp.pipelines.logiless_client import LogilessClient
 JST = ZoneInfo("Asia/Tokyo")
 
 # Logiless配送方法 → RMS配送業者ID のマッピング
-# ※ RMS配送業者IDは店舗設定によって異なる。要実環境確認。
+# ※ 実データから確認: deliveryCompany=1003=日本郵便（全注文共通）
+# ゆうパケット・ゆうパックとも日本郵便(1003)で登録されている
 DELIVERY_METHOD_MAP: dict[str, dict] = {
-    "yu_packet_3cm": {"shippingCompanyId": 103, "name": "ゆうパケット"},
-    "yu_packet_5cm": {"shippingCompanyId": 103, "name": "ゆうパケット"},
-    "yu_pack": {"shippingCompanyId": 102, "name": "ゆうパック"},
-    "yamato": {"shippingCompanyId": 100, "name": "ヤマト運輸"},
-    "sagawa": {"shippingCompanyId": 101, "name": "佐川急便"},
-    "yamato_kuroneko": {"shippingCompanyId": 100, "name": "ヤマト運輸（クロネコDM）"},
+    "yu_packet_3cm": {"shippingCompanyId": 1003, "name": "日本郵便"},
+    "yu_packet_5cm": {"shippingCompanyId": 1003, "name": "日本郵便"},
+    "yu_pack": {"shippingCompanyId": 1003, "name": "日本郵便"},
+    "yamato": {"shippingCompanyId": 1000, "name": "ヤマト運輸"},
+    "sagawa": {"shippingCompanyId": 1001, "name": "佐川急便"},
+    "yamato_kuroneko": {"shippingCompanyId": 1000, "name": "ヤマト運輸"},
 }
 
 
