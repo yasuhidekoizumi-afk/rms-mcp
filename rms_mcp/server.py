@@ -78,23 +78,19 @@ TOOLS = [
          inputSchema={"type": "object", "properties": {
              "order_numbers": {"type": "array", "items": {"type": "string"}},
          }, "required": ["order_numbers"]}),
-    Tool(name="rms_update_shipping", description="配送情報更新（配送業者・追跡番号の登録）",
+    Tool(name="rms_update_shipping", description="配送情報更新（配送業者・追跡番号の登録）。basketIdが必要。",
          inputSchema={"type": "object", "properties": {
-             "payloads": {"type": "array", "items": {
+             "order_number": {"type": "string", "description": "RMS注文番号"},
+             "basket_id": {"type": "integer", "description": "basketId（getOrderで取得）"},
+             "shipping_list": {"type": "array", "items": {
                  "type": "object",
                  "properties": {
-                     "orderNumber": {"type": "string"},
-                     "shippingList": {"type": "array", "items": {
-                         "type": "object",
-                         "properties": {
-                             "shippingId": {"type": "integer"},
-                             "shippingCompanyId": {"type": "integer"},
-                             "shippingNumber": {"type": "string"},
-                         },
-                     }},
+                     "shippingId": {"type": "integer"},
+                     "shippingCompanyId": {"type": "integer"},
+                     "shippingNumber": {"type": "string"},
                  },
              }},
-         }, "required": ["payloads"]}),
+         }, "required": ["order_number", "basket_id", "shipping_list"]}),
     Tool(name="rms_update_sub_status", description="サブステータス更新（出荷準備中・確認済み等）",
          inputSchema={"type": "object", "properties": {
              "order_status_list": {"type": "array", "items": {
@@ -322,8 +318,8 @@ async def _confirm_order(args: dict, api: OrderAPI) -> list[TextContent]:
 
 
 async def _update_shipping(args: dict, api: OrderAPI) -> list[TextContent]:
-    r = api.update_order_shipping(args["payloads"])
-    lines = [f"# 配送情報更新: {len(args['payloads'])}件"]
+    r = api.update_order_shipping(args["order_number"], args["basket_id"], args["shipping_list"])
+    lines = [f"# 配送情報更新: {args['order_number']}"]
     lines.append(f"```json\n{json.dumps(r, ensure_ascii=False, indent=2)}\n```")
     return [TextContent(type="text", text="\n".join(lines))]
 

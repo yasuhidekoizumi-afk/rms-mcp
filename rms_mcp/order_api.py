@@ -96,22 +96,28 @@ class OrderAPI:
             json={"orderNumberList": order_numbers},
         ).json()
 
-    def update_order_shipping(self, payloads: list[dict]) -> dict:
+    def update_order_shipping(self, order_number: str, basket_id: int,
+                              shipping_list: list[dict]) -> dict:
         """配送情報更新（配送業者・配送番号の登録）.
 
-        各 payload の形式:
-        {
-            "orderNumber": "404839-20260716-xxxxxxxx",
-            "shippingList": [{
-                "shippingId": 1,
-                "shippingCompanyId": 100,  # 配送業者ID
-                "shippingNumber": "1234-5678-9012",  # 追跡番号
-            }]
-        }
+        RMS APIは orderNumber + BasketidModelList(ShippingModelList) の形式を要求する。
+        basketId は getOrder で取得できる（PackageModelList[].basketId）。
+
+        shipping_list の各要素:
+        {"shippingId": 1, "shippingCompanyId": 100, "shippingNumber": "1234-5678-9012"}
         """
+        payload = {
+            "orderNumber": order_number,
+            "BasketidModelList": [
+                {
+                    "basketId": basket_id,
+                    "ShippingModelList": shipping_list,
+                }
+            ],
+        }
         return self._c.post(
             "/order/updateOrderShipping/",
-            json={"Parameter_Model": {"updateOrderShippingModels": payloads}},
+            json=payload,
         ).json()
 
     def update_order_shipping_async(self, payloads: list[dict]) -> dict:
