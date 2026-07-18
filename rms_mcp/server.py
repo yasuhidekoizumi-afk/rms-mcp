@@ -14,6 +14,7 @@ from rms_mcp.order_api import OrderAPI, ACTIVE_PROGRESS
 from rms_mcp.item_api import ItemAPI
 from rms_mcp.inventory_api import InventoryAPI
 from rms_mcp.coupon_api import CouponAPI
+from rms_mcp.inquiry_api import InquiryAPI
 
 JST = ZoneInfo("Asia/Tokyo")
 server = Server("rms-mcp")
@@ -174,6 +175,20 @@ TOOLS = [
              "variant_id": {"type": "string", "description": "バリアントID"},
              "price": {"type": "integer", "description": "新しい価格（税込）"},
          }, "required": ["manage_number", "variant_id", "price"]}),
+
+    # ── 問い合わせ管理 ──
+    Tool(name="rms_inquiries", description="問い合わせ管理（件数確認・一覧・詳細・返信）",
+         inputSchema={"type": "object", "properties": {
+             "action": {"type": "string", "enum": ["count", "list", "detail", "reply"],
+                        "description": "count=件数, list=一覧, detail=詳細, reply=返信"},
+             "from_date": {"type": "string", "description": "開始日 YYYY-MM-DD (list/count)"},
+             "to_date": {"type": "string", "description": "終了日 YYYY-MM-DD (list/count)"},
+             "limit": {"type": "integer", "description": "取得件数 (list)"},
+             "page": {"type": "integer", "description": "ページ (list)"},
+             "inquiry_number": {"type": "string", "description": "問い合わせ番号 (detail/reply)"},
+             "message": {"type": "string", "description": "返信本文 (reply)"},
+             "no_merchant_reply": {"type": "boolean", "description": "未返信のみ絞り込み (list)"},
+         }, "required": ["action"]}),
 ]
 
 
@@ -222,6 +237,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _search_coupons(arguments, coupon_api)
         elif name == "rms_update_price":
             return await _update_price(arguments, item_api)
+        elif name == "rms_inquiries":
+            return await _inquiries(arguments, item_api, order_api, inv_api, coupon_api)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     finally:
         c.close()
@@ -488,6 +505,67 @@ async def _update_price(args: dict, api: ItemAPI) -> list[TextContent]:
     lines = [f"# 価格変更: {mn} / {vid} → ¥{price}"]
     lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)}\n```")
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _inquiries(args: dict, item_api, order_api, inv_api, coupon_api) -> list[TextContent]:
+    """問い合わせ件数・一覧・返信を処理.
+
+    使用例:
+    - 件数確認: {"action": "count", "from_date": "2026-07-01", "to_date": "2026-07-18"}
+    - 一覧: {"action": "list", "from_date": "2026-07-01", "to_date": "2026-07-18", "limit": 5}
+    - 詳細: {"action": "detail", "inquiry_number": "404839-20260702-xxxxxxx"}
+    """
+    from rms_mcp.inquiry_api import InquiryAPI
+    c = RMSClient(os.environ["RMS_SERVICE_SECRET"], os.environ["RMS_LICENSE_KEY"])
+    api = InquiryAPI(c)
+
+    action = args.get("action", "count")
+    
+    if action == "count":
+        from_date = args.get("from_date", "2026-07-01") + "T00:00:00"
+        to_date = args.get("to_date", "2026-07-18") + "T23:59:59"
+        count = api.get_count(from_date, to_date)
+        return [TextContent(type="text", text=f"# 問い合わせ件数\n**{count}件** （{from_date[:10] }〜{to_date[:10]}）")]
+    
+    elif action == "list":
+        from_date = args.get("from_date", "2026-07-01") + "T00:00:00"
+        to_date = args.get("to_date", "2026-07-18") + "T23:59:59"
+        limit = args.get("limit", 20)
+        page = args.get("page", 1)
+        no_reply = args.get("no_merchant_reply")
+        
+        r = api.get_inquiries(from_date, to_date, limit=limit, page=page, no_merchant_reply=no_reply)
+        total = r.get("totalCount", 0)
+        items = r.get("list", [])
+        
+        lines = [f"# 問い合わせ一覧: 全{total}件"]
+        lines.append("| inquiryNumber | user | date | noReply | tag |")
+        lines.append("|---|---|---|---|---|")
+        for item in items:
+            num = item.get("inquiryNumber", "")
+            user = item.get("userName", "")[:20]
+            date = item.get("inquiryDate", "")[:10]
+            no_r = "○" if item.get("noMerchantReply") else ""
+            tag = item.get("tag", "")
+            lines.append(f"| {num} | {user} | {date} | {no_r} | {tag} |")
+        lines.append(f"\n詳細は `action: detail, inquiry_number: 番号` で")
+        return [TextContent(type="text", text="\n".join(lines))]
+    
+    elif action == "detail":
+        num = args["inquiry_number"]
+        r = api.get_inquiry(num)
+        result = r.get("result", r)
+        lines = [f"# 問い合わせ詳細: {num}"]
+        lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)[:2000]}\n```")
+        return [TextContent(type="text", text="\n".join(lines))]
+    
+    elif action == "reply":
+        num = args["inquiry_number"]
+        message = args["message"]
+        r = api.reply(num, 404839, message)
+        return [TextContent(type="text", text=f"# 返信送信: {num}\n```json\n{json.dumps(r, ensure_ascii=False, indent=2)}\n```")]
+
+    return [TextContent(type="text", text=f"Unknown action: {action}")]
 
 async def _get_inventory(args: dict, api: InventoryAPI) -> list[TextContent]:
     """指定商品の全バリアントの在庫を取得."""
