@@ -6,11 +6,13 @@ RMSの画面操作が必要な領域（API非対応）を自動化する:
 - CSV一括アップロード
 - レビュー取得
 
-認証フロー:
-1. R-Login（ID + パスワード）
-2. 楽天会員ログイン（メール + パスワード）
-3. 法令確認画面の突破
-4. RMS WEB SERVICE への遷移
+認証フロー（実動作確認済み）:
+1. R-Login: login_id + password → Enterキー送信
+2. 楽天会員ログイン: email → Enter
+3. パスワード入力 → Enter
+4. 「お知らせ」画面 → 「次へ」
+5. 「RMSを利用します」クリック
+6. RMSメインメニュー到達 → Cookie保存
 
 環境変数:
   RMS_RLOGIN_ID: R-Login ID
@@ -21,107 +23,81 @@ RMSの画面操作が必要な領域（API非対応）を自動化する:
 import asyncio
 import os
 import json
-import time
 from typing import Any
 from pathlib import Path
 
 from playwright.async_api import async_playwright, Page, BrowserContext
 
-RMS_LOGIN_URL = "https://mainmenu.rms.rakuten.co.jp/rms"
+RMS_LOGIN_URL = "https://glogin.rms.rakuten.co.jp/?sp_id=1"
+RMS_MAIN_URL = "https://mainmenu.rms.rakuten.co.jp/"
 RMS_WEB_SERVICE_URL = "https://webservice.rms.rakuten.co.jp/merchant-portal/"
 COOKIES_PATH = Path.home() / ".cache" / "rms-playwright-cookies.json"
 
-# 法令確認画面のボタンが押せない問題への対応:
-# JavaScript のフォーム送信を直接実行する
-
 
 async def login_to_rms(page: Page) -> bool:
-    """RMSにログインし、法令確認画面を突破する.
+    """RMSにログイン（Playwright + 本物のChrome）.
 
-    Returns: True if login successful
+    headless=False + channel="chrome" で起動すること。
+    Cookieは自動保存される。
     """
-    rlogin_id = os.environ.get("RMS_RLOGIN_ID", "")
-    rlogin_pass = os.environ.get("RMS_RLOGIN_PASSWORD", "")
-    user_email = os.environ.get("RMS_USER_EMAIL", "")
-    user_pass = os.environ.get("RMS_USER_PASSWORD", "")
-
-    if not all([rlogin_id, rlogin_pass, user_email, user_pass]):
+    env = {
+        "rlogin_id": os.environ.get("RMS_RLOGIN_ID", ""),
+        "rlogin_pass": os.environ.get("RMS_RLOGIN_PASSWORD", ""),
+        "email": os.environ.get("RMS_USER_EMAIL", ""),
+        "pass": os.environ.get("RMS_USER_PASSWORD", ""),
+    }
+    if not all(env.values()):
         raise RuntimeError("RMS_RLOGIN_ID, RMS_RLOGIN_PASSWORD, RMS_USER_EMAIL, RMS_USER_PASSWORD required")
 
-    # Step 1: R-Login
-    print("[rms_login] Step 1: R-Login")
     await page.goto(RMS_LOGIN_URL, wait_until="networkidle", timeout=30000)
-    await page.fill('input[name="user_id"]', rlogin_id)
-    await page.fill('input[name="password"]', rlogin_pass)
-    await page.click('input[type="submit"], button[type="submit"]')
-    await page.wait_for_load_state("networkidle", timeout=15000)
 
-    # Step 2: 楽天会員ログイン（メールアドレス入力）
-    print("[rms_login] Step 2: Rakuten member login (email)")
-    try:
-        email_input = page.locator('input[type="email"], input[name="user_id"], input[placeholder*="メール"]')
-        await email_input.wait_for(timeout=10000)
-        await email_input.fill(user_email)
-        await page.click('button:has-text("次へ"), input[type="submit"]')
-        await page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        pass  # 既にログイン済みの可能性
+    # Step 1: R-Login
+    await page.fill('#rlogin-username-ja', env["rlogin_id"])
+    await page.fill('#rlogin-password-ja', env["rlogin_pass"])
+    await page.press('#rlogin-password-ja', 'Enter')
+    await asyncio.sleep(5)
 
-    # Step 3: パスワード入力
-    print("[rms_login] Step 3: Password")
-    try:
-        pass_input = page.locator('input[type="password"]')
-        await pass_input.wait_for(timeout=10000)
-        await pass_input.fill(user_pass)
-        await page.click('button:has-text("次へ"), input[type="submit"]')
-        await page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        pass
+    # Step 2: Email
+    if await page.locator('#user_id').count():
+        await page.fill('#user_id', env["email"])
+        await page.press('#user_id', 'Enter')
+        await asyncio.sleep(3)
 
-    # Step 4: 「お気をつけください」画面の「次へ」
-    print("[rms_login] Step 4: Safety notice")
-    try:
-        next_btn = page.locator('button:has-text("次へ"), input[value="次へ"]')
-        if await next_btn.count() > 0:
-            await next_btn.click()
-            await page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception:
-        pass
+    # Step 3: Password
+    if await page.locator('#password_current').count():
+        await page.fill('#password_current', env["pass"])
+        await page.press('#password_current', 'Enter')
+        await asyncio.sleep(5)
 
-    # Step 5: 法令確認画面の突破
-    print("[rms_login] Step 5: Terms confirmation")
-    try:
-        rms_btn = page.locator('button:has-text("RMSを利用"), input[value*="RMSを利用"]')
-        if await rms_btn.count() > 0:
-            # JavaScript のフォーム送信を直接実行
-            await page.evaluate('''() => {
-                const form = document.querySelector('form');
-                if (form) {
-                    // フォームの action に直接POST
-                    form.submit();
-                }
-            }''')
-            await page.wait_for_load_state("networkidle", timeout=15000)
-    except Exception as e:
-        print(f"[rms_login] Step 5 warning: {e}")
+    # Step 4: 「お知らせ」を全て「次へ」
+    for _ in range(10):
+        if await page.locator('button:has-text("次へ")').count():
+            await page.locator('button:has-text("次へ")').first.click()
+            await asyncio.sleep(2)
+        else:
+            break
 
-    # ログイン成功確認
-    url = page.url
-    if "mainmenu.rms.rakuten.co.jp" in url and "login_error" not in url:
+    # Step 5: 「RMSを利用します」
+    rms_btn = page.locator('button:has-text("RMS"), input[value*="RMS"]')
+    if await rms_btn.count():
+        await rms_btn.first.click()
+        await asyncio.sleep(3)
+
+    # 成功チェック
+    if "mainmenu.rms" in page.url or await page.locator('[href*="merchant-portal"]').count():
         print("[rms_login] ✅ Login successful")
         return True
-    else:
-        print(f"[rms_login] ⚠️ Login state unclear, URL: {url}")
-        return "login_error" not in url
+    print(f"[rms_login] ⚠️ Login state: {page.url}")
+    return False
 
 
 async def save_cookies(context: BrowserContext, path: Path | None = None):
-    """Cookieを保存（セッション再利用用）."""
+    """Cookieを保存."""
     path = path or COOKIES_PATH
     path.parent.mkdir(parents=True, exist_ok=True)
     cookies = await context.cookies()
-    path.write_text(json.dumps(cookies))
-    print(f"[rms_login] Cookies saved to {path}")
+    path.write_text(json.dumps(cookies, ensure_ascii=False))
+    print(f"[rms_login] {len(cookies)} cookies saved to {path}")
 
 
 async def load_cookies(context: BrowserContext, path: Path | None = None) -> bool:
@@ -131,120 +107,69 @@ async def load_cookies(context: BrowserContext, path: Path | None = None) -> boo
         return False
     cookies = json.loads(path.read_text())
     await context.add_cookies(cookies)
-    print(f"[rms_login] Cookies loaded from {path}")
+    print(f"[rms_login] {len(cookies)} cookies loaded from {path}")
     return True
 
 
-async def get_rms_page(headless: bool = True):
+async def get_rms_page(headless: bool = False) -> tuple:
     """RMSログイン済みのPageを取得（Cookie再利用付き）.
 
-    Returns: (browser, context, page)
+    Returns: (pw, browser, context, page)
     """
     pw = await async_playwright().start()
-    browser = await pw.chromium.launch(headless=headless)
-
+    browser = await pw.chromium.launch(
+        headless=headless,
+        channel="chrome",
+        args=['--disable-blink-features=AutomationControlled']
+    )
     context = await browser.new_context(
         viewport={"width": 1280, "height": 800},
-        user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        locale="ja-JP",
     )
-
-    # Cookie再利用を試みる
-    has_cookies = await load_cookies(context)
+    await context.add_init_script(
+        "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
+    )
     page = await context.new_page()
 
-    if has_cookies:
-        await page.goto(RMS_LOGIN_URL, wait_until="networkidle", timeout=20000)
-        url = page.url
-        if "mainmenu.rms.rakuten.co.jp" in url and "login_error" not in url:
-            print("[rms_login] ✅ Session reused via cookies")
-            return pw, browser, context, page
+    # Cookie再利用
+    await load_cookies(context)
 
-    # Cookieがない or 期限切れ → 新規ログイン
+    # WEB SERVICEに直接アクセス
+    await page.goto(RMS_WEB_SERVICE_URL, wait_until="networkidle", timeout=30000)
+    if "login" not in page.url.lower():
+        print("[rms_login] ✅ Session valid via cookies")
+        return pw, browser, context, page
+
+    # Cookie期限切れ → 新規ログイン
+    print("[rms_login] Session expired, re-logging in...")
     success = await login_to_rms(page)
     if success:
         await save_cookies(context)
     return pw, browser, context, page
 
 
-async def fetch_ad_report(date_from: str, date_to: str, headless: bool = True) -> dict:
-    """RPP広告レポートをDLして解析.
-
-    date_from/date_to: YYYY-MM-DD
-    """
-    pw, browser, context, page = await get_rms_page(headless=headless)
-
-    try:
-        # 広告管理画面へ遷移
-        print("[ad_report] Navigating to RPP ad report page...")
-        await page.goto(
-            "https://mainmenu.rms.rakuten.co.jp/?act=module&module=order%2Forder_search_list",
-            wait_until="networkidle",
-            timeout=20000,
-        )
-
-        # TODO: 広告レポートのDLボタンを特定してクリック
-        # RMSの広告管理画面のDOM構造は変更される可能性があるため、
-        # 実行時にヘルスチェックを行う
-
-        result = {"status": "requires_manual_check", "url": page.url}
-        return result
-
-    finally:
-        await browser.close()
-        await pw.stop()
-
-
-async def enter_event(event_name: str, headless: bool = True) -> dict:
-    """イベント（お買い物マラソン等）の申し込み.
-
-    event_name: イベント名（お買い物マラソン / スーパーSALE等）
-    """
-    pw, browser, context, page = await get_rms_page(headless=headless)
-
-    try:
-        # RMSのイベント申し込みページへ遷移
-        print(f"[event_entry] Entering {event_name}...")
-        # TODO: イベント申し込みページのURLとDOMを特定
-
-        result = {"status": "requires_manual_check", "event": event_name}
-        return result
-
-    finally:
-        await browser.close()
-        await pw.stop()
+async def navigate_to(page: Page, link_text: str) -> bool:
+    """WEB SERVICE内のリンクをクリックして遷移."""
+    link = page.locator(f'a:has-text("{link_text}")')
+    if await link.count():
+        await link.first.click()
+        await asyncio.sleep(3)
+        return True
+    return False
 
 
 async def health_check(headless: bool = True) -> dict:
-    """RMSログインができるかヘルスチェック."""
+    """RMSログイン状態を確認."""
     pw, browser, context, page = await get_rms_page(headless=headless)
-
-    try:
-        url = page.url
-        title = await page.title()
-        return {
-            "status": "ok" if "login_error" not in url else "error",
-            "url": url,
-            "title": title,
-        }
-    finally:
-        await browser.close()
-        await pw.stop()
+    url = page.url
+    title = await page.title()
+    await browser.close()
+    await pw.stop()
+    return {"status": "ok" if "login" not in url.lower() else "error", "url": url, "title": title}
 
 
 if __name__ == "__main__":
     import sys
-
     if "--health-check" in sys.argv:
         result = asyncio.run(health_check(headless=False))
         print(json.dumps(result, ensure_ascii=False, indent=2))
-    elif "--login-test" in sys.argv:
-        async def test():
-            pw, browser, context, page = await get_rms_page(headless=False)
-            url = page.url
-            title = await page.title()
-            print(f"URL: {url}")
-            print(f"Title: {title}")
-            await page.screenshot(path="/tmp/rms-login-test.png")
-            await browser.close()
-            await pw.stop()
-        asyncio.run(test())
