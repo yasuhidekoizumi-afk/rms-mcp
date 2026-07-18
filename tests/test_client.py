@@ -54,8 +54,8 @@ def test_retries_on_500_then_succeeds():
     c = _make_client(sleeps)
     r = c.post("/order/searchOrder/", json={})
     assert r.json()["orderNumberList"] == ["A"]
-    # Two backoffs before the 3rd success: 0.5s, 1.0s
-    assert sleeps == [0.5, 1.0]
+    # Two backoffs before the 3rd success: 1.0s, 2.0s
+    assert sleeps == [1.0, 2.0]
     c.close()
 
 
@@ -68,7 +68,7 @@ def test_retries_exhausted_on_persistent_5xx():
     with pytest.raises(RuntimeError) as exc:
         c.post("/order/searchOrder/", json={})
     assert "502" in str(exc.value)
-    assert "after 3 attempts" in str(exc.value)
+    assert "after 5 attempts" in str(exc.value)
     c.close()
 
 
@@ -98,5 +98,5 @@ def test_retries_on_connect_error():
     c = _make_client(sleeps)
     r = c.post("/order/searchOrder/", json={})
     assert r.status_code == 200
-    assert sleeps == [0.5]
+    assert sleeps == [1.0]
     c.close()

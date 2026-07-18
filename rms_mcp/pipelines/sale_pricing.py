@@ -168,7 +168,7 @@ def start_sale(rms_secret: str, rms_license: str,
             errors.append({"sku": f"{u['manageNumber']}:{u['variantId']}", "error": str(e)[:200]})
             print(f"  ❌ {u['manageNumber']}:{u['variantId']} {str(e)[:60]}")
 
-        time.sleep(0.5)  # rate limit
+        time.sleep(1.0)  # QPS制限対策（ItemAPIは1req/sec程度）
 
     c.close()
 

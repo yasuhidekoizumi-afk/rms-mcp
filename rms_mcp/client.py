@@ -6,9 +6,9 @@ import httpx
 
 REST_BASE = "https://api.rms.rakuten.co.jp/es/2.0"
 
-RETRY_STATUS = {500, 502, 503, 504}
-RETRY_MAX_ATTEMPTS = 3
-RETRY_BACKOFF_BASE = 0.5  # seconds; doubles each attempt (0.5s, 1s, 2s)
+RETRY_STATUS = {429, 500, 502, 503, 504}
+RETRY_MAX_ATTEMPTS = 5
+RETRY_BACKOFF_BASE = 1.0  # seconds; doubles each attempt (1s, 2s, 4s, 8s)
 
 
 class RMSClient:

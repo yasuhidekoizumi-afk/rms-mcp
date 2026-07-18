@@ -9,6 +9,7 @@
   DELETE /es/2.0/items/manage-numbers/{manageNumber}       — 削除
   POST   /es/2.0/items/bulk-get                            — 一括取得
 """
+import time
 from typing import Any
 
 from rms_mcp.client import RMSClient
@@ -62,6 +63,7 @@ class ItemAPI:
             if len(all_items) >= total or not results:
                 break
             offset += SEARCH_PAGE_SIZE
+            time.sleep(1.0)  # QPS制限対策（ItemAPIは1req/sec程度）
         return all_items
 
     def get(self, manage_number: str) -> dict:
