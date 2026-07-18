@@ -27,8 +27,9 @@ async def _make_browser(headless: bool = True):
     """Playwrightブラウザを起動（共通処理）. Returns (pw, browser, context, page)."""
     pw = await async_playwright().start()
     browser = await pw.chromium.launch(
-        headless=headless, channel="chrome",
-        args=['--disable-blink-features=AutomationControlled']
+        headless=headless,
+        channel="chrome" if sys.platform == "darwin" else None,
+        args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
     )
     context = await browser.new_context(
         viewport={"width": 1280, "height": 800},

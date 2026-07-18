@@ -43,8 +43,8 @@ async def download_rpp_report(from_date: str, to_date: str,
     pw = await async_playwright().start()
     browser = await pw.chromium.launch(
         headless=headless,
-        channel="chrome",
-        args=['--disable-blink-features=AutomationControlled']
+        channel="chrome" if sys.platform == "darwin" else None,
+        args=['--disable-blink-features=AutomationControlled', '--no-sandbox']
     )
     context = await browser.new_context(
         viewport={"width": 1280, "height": 800},
