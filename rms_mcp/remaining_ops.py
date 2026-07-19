@@ -30,33 +30,65 @@ async def _make_page(headless: bool = True):
     return pw, browser, context, page
 
 
-async def post_review_reply(review_url: str, reply_text: str, headless: bool = True) -> dict:
-    """レビュー返信を投稿（Playwrightでreview.rms.rakuten.co.jpにアクセス）.
+async def post_review_reply(review_index: int = 0, reply_text: str = "",
+                            headless: bool = True) -> dict:
+    """レビュー返信を投稿（review.rms.rakuten.co.jp）。
 
-    review_url: レビューの個別URL（review.rms.rakuten.co.jp/item/...）
-    reply_text: 返信文面
+    レビュー一覧画面の「編集」ボタン → インラインテキストエリア → 返信投稿。
+    review_index: 何番目のレビューに返信するか（0=最初）
+    reply_text: 返信文面（省略時はAIテンプレート）
     """
     pw, browser, context, page = await _make_page(headless)
 
     try:
-        await page.goto(review_url, wait_until="networkidle", timeout=30000)
+        await page.goto("https://review.rms.rakuten.co.jp/search/index/",
+                       wait_until="networkidle", timeout=30000)
 
-        # 返信用のテキストエリアを探す
-        textarea = page.locator('textarea')
+        # 「編集」ボタンをクリック（指定インデックス）
+        clicked = await page.evaluate(f'''(idx) => {{
+            const links = document.querySelectorAll('a.edit_btn, a');
+            let count = 0;
+            for (const a of links) {{
+                if (a.textContent.trim() === '編集' && !a.textContent.includes('キャンセル')) {{
+                    if (count === idx) {{
+                        a.scrollIntoView();
+                        a.click();
+                        return true;
+                    }}
+                    count++;
+                }}
+            }}
+            return false;
+        }}''', review_index)
+
+        if not clicked:
+            return {"status": "error", "message": f"Edit button #{review_index} not found"}
+
+        await asyncio.sleep(2)
+
+        # 表示されたテキストエリアを探す
+        textarea = page.locator('textarea').filter(has_not=page.locator('[name="aireply_input_text"]')).first
         if await textarea.count() == 0:
-            return {"status": "error", "message": "No textarea found for reply"}
+            return {"status": "error", "message": "No reply textarea found"}
 
         await textarea.fill(reply_text)
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)
 
-        # 「返信する」「投稿する」などのボタンをクリック
-        btn = page.locator('button:has-text("返信"), button:has-text("投稿"), input[value*="返信"]')
-        if await btn.count():
-            await btn.click()
+        # 投稿ボタンをクリック
+        submit_btn = page.locator('button:has-text("投稿"), button:has-text("返信"), input[value*="返信"], a:has-text("投稿")')
+        if await submit_btn.count():
+            await submit_btn.first.click()
             await asyncio.sleep(3)
             return {"status": "ok", "message": "Reply posted"}
-        else:
-            return {"status": "error", "message": "No submit button found"}
+
+        # 「編集をキャンセル」ボタンがあれば、その近くに投稿ボタンがあるはず
+        cancel_btn = page.locator('a:has-text("編集をキャンセル")').first
+        if await cancel_btn.count():
+            # 同じ行の前の要素が投稿ボタン
+            parent_text = await cancel_btn.evaluate('el => el.parentElement?.textContent?.trim()')
+            return {"status": "skipped", "message": f"No submit button found. Parent: {parent_text[:100]}"}
+
+        return {"status": "error", "message": "No submit button found"}
     finally:
         await browser.close()
         await pw.stop()
@@ -150,9 +182,9 @@ if __name__ == "__main__":
         print(draft)
 
     elif "--reply-review" in sys.argv:
-        url = sys.argv[sys.argv.index("--reply-review") + 1]
-        text = sys.argv[sys.argv.index("--text") + 1] if "--text" in sys.argv else "レビューありがとうございます。"
-        result = asyncio.run(post_review_reply(url, text, headless="--visible" not in sys.argv))
+        idx = int(sys.argv[sys.argv.index("--reply-review") + 1]) if len(sys.argv) > sys.argv.index("--reply-review") + 1 and sys.argv[sys.argv.index("--reply-review") + 1].isdigit() else 0
+        text = "レビューありがとうございます。これからもよろしくお願いいたします。"
+        result = asyncio.run(post_review_reply(review_index=idx, reply_text=text, headless="--visible" not in sys.argv))
         print(json.dumps(result, ensure_ascii=False, indent=2))
 
     else:
