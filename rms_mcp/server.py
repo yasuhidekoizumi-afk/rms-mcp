@@ -189,6 +189,33 @@ TOOLS = [
              "message": {"type": "string", "description": "返信本文 (reply)"},
              "no_merchant_reply": {"type": "boolean", "description": "未返信のみ絞り込み (list)"},
          }, "required": ["action"]}),
+
+    # ── 商品: 登録・更新 ──
+    Tool(name="rms_upsert_product", description="商品を新規登録または更新（管理番号でupsert）。title, itemNumber, standardPrice, description, genreId, variants, images などを指定。",
+         inputSchema={"type": "object", "properties": {
+             "manage_number": {"type": "string", "description": "商品管理番号（新規の場合は任意の一意な文字列）"},
+             "title": {"type": "string", "description": "商品タイトル（必須）"},
+             "item_number": {"type": "string", "description": "商品番号（SKU）"},
+             "standard_price": {"type": "integer", "description": "税込標準価格"},
+             "description": {"type": "string", "description": "商品説明（PC用）"},
+             "genre_id": {"type": "integer", "description": "楽天ジャンルID"},
+             "tagline": {"type": "string", "description": "キャッチコピー"},
+             "item_type": {"type": "string", "description": "NORMAL / etc. 省略時NORMAL"},
+             "variant_id": {"type": "string", "description": "バリアントID（省略時=default-variant）"},
+         }, "required": ["manage_number", "title"]}),
+
+    # ── クーポン: 発行 ──
+    Tool(name="rms_issue_coupon", description="新規クーポンを発行する",
+         inputSchema={"type": "object", "properties": {
+             "coupon_name": {"type": "string", "description": "クーポン名（必須）"},
+             "coupon_start_date": {"type": "string", "description": "開始日時 (YYYY-MM-DDTHH:MM:SS+09:00)"},
+             "coupon_end_date": {"type": "string", "description": "終了日時 (YYYY-MM-DDTHH:MM:SS+09:00)"},
+             "discount_type": {"type": "integer", "description": "1=円引, 2=%引", "default": 1},
+             "discount_factor": {"type": "integer", "description": "割引額(円) または 割引率(%)"},
+             "issue_count": {"type": "integer", "description": "発行枚数", "default": 1000},
+             "member_avail_max_count": {"type": "integer", "description": "1人あたり利用回数上限", "default": 1},
+             "item_type": {"type": "integer", "description": "4=全商品, 2=特定商品", "default": 4},
+         }, "required": ["coupon_name", "coupon_start_date", "coupon_end_date", "discount_type", "discount_factor"]}),
 ]
 
 
@@ -239,6 +266,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _update_price(arguments, item_api)
         elif name == "rms_inquiries":
             return await _inquiries(arguments, item_api, order_api, inv_api, coupon_api)
+        elif name == "rms_upsert_product":
+            return await _upsert_product(arguments, item_api)
+        elif name == "rms_issue_coupon":
+            return await _issue_coupon(arguments, coupon_api)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     finally:
         c.close()
@@ -620,6 +651,73 @@ async def _update_inventory(args: dict, api: InventoryAPI) -> list[TextContent]:
     result = api.bulk_upsert(inventory_list)
     lines = [f"# 在庫更新: {len(updates)}件"]
     lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)}\n```")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+# ─── 商品登録 ──────────────────────────────────────────────
+
+async def _upsert_product(args: dict, api: ItemAPI) -> list[TextContent]:
+    """商品を新規登録または更新."""
+    mn = args["manage_number"]
+    title = args["title"]
+
+    item_data: dict = {
+        "manageNumber": mn,
+        "title": title,
+        "itemType": args.get("item_type", "NORMAL"),
+    }
+    if item_number := args.get("item_number"):
+        item_data["itemNumber"] = item_number
+    if standard_price := args.get("standard_price"):
+        item_data["standardPrice"] = standard_price
+    if description := args.get("description"):
+        item_data["description"] = description
+    if genre_id := args.get("genre_id"):
+        item_data["genreId"] = genre_id
+    if tagline := args.get("tagline"):
+        item_data["tagline"] = tagline
+
+    # バリアント設定
+    variant_id = args.get("variant_id", "default-variant")
+    variant_data = {"standardPrice": str(standard_price)} if standard_price else {}
+    if item_number:
+        variant_data["merchantDefinedSkuId"] = item_number
+    item_data["variants"] = {variant_id: variant_data}
+
+    result = api.upsert(mn, item_data)
+    lines = [f"# 商品登録: {mn}" if result.get("status") == "ok" else f"# 商品登録エラー: {mn}"]
+    lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)}\n```")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+# ─── クーポン発行 ──────────────────────────────────────────
+
+async def _issue_coupon(args: dict, api: CouponAPI) -> list[TextContent]:
+    """クーポンを新規発行."""
+    coupon_data = {
+        "couponName": args["coupon_name"],
+        "couponStartDate": args["coupon_start_date"],
+        "couponEndDate": args["coupon_end_date"],
+        "discountType": args["discount_type"],
+        "discountFactor": args["discount_factor"],
+        "itemType": args.get("item_type", 4),
+        "memberAvailMaxCount": args.get("member_avail_max_count", 1),
+        "issueCount": args.get("issue_count", 1000),
+    }
+
+    result = api.issue(coupon_data)
+    coupon_code = result.get("couponCode", "?")
+    dtype = "円引" if args["discount_type"] == 1 else "%引"
+    factor = args["discount_factor"]
+    period = f"{args['coupon_start_date'][:10]}〜{args['coupon_end_date'][:10]}"
+
+    lines = [f"# クーポン発行"]
+    lines.append(f"- コード: `{coupon_code}`")
+    lines.append(f"- 名前: {args['coupon_name']}")
+    lines.append(f"- 割引: {factor}{dtype}")
+    lines.append(f"- 期間: {period}")
+    lines.append(f"- 枚数: {args.get('issue_count', 1000)}枚")
+    lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)[:500]}\n```")
     return [TextContent(type="text", text="\n".join(lines))]
 
 
