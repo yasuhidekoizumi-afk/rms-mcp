@@ -9,6 +9,7 @@ Auth model: OAuth 2.0 Authorization Code + PKCE per MCP spec.
 Designed for a 2-3 person internal team. See oauth.py for details.
 """
 import contextlib
+import os
 from collections.abc import AsyncIterator
 
 from mcp.server.lowlevel import Server
@@ -35,7 +36,11 @@ PUBLIC_PATHS = {
 
 
 class OAuthBearerMiddleware(BaseHTTPMiddleware):
-    """Enforce Bearer auth on protected paths; let OAuth/health pass through."""
+    """Enforce Bearer auth on protected paths; let OAuth/health pass through.
+
+    Also accepts a static API key via RMS_MCP_API_KEY env var for
+    simple internal use (no OAuth flow needed).
+    """
 
     async def dispatch(self, request: Request, call_next):
         path = request.url.path
@@ -53,6 +58,12 @@ class OAuthBearerMiddleware(BaseHTTPMiddleware):
                 },
             )
         token = auth[len("Bearer "):].strip()
+
+        # Static API key (for internal non-OAuth clients like Claude Code)
+        api_key = os.environ.get("RMS_MCP_API_KEY", "")
+        if api_key and token == api_key:
+            return await call_next(request)
+
         if not oauth.validate_bearer(token):
             return JSONResponse(
                 {"error": "Invalid or expired token"},
