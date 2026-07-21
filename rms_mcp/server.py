@@ -216,6 +216,24 @@ TOOLS = [
              "member_avail_max_count": {"type": "integer", "description": "1人あたり利用回数上限", "default": 1},
              "item_type": {"type": "integer", "description": "4=全商品, 2=特定商品", "default": 4},
          }, "required": ["coupon_name", "coupon_start_date", "coupon_end_date", "discount_type", "discount_factor"]}),
+
+    # ── Playwright系（ブラウザ自動操作） ──
+    Tool(name="rms_post_review_reply", description="レビューに返信を投稿する（ブラウザ操作）。Cookieが必要。",
+         inputSchema={"type": "object", "properties": {
+             "review_index": {"type": "integer", "description": "何番目のレビューに返信するか（0=最初）", "default": 0},
+             "reply_text": {"type": "string", "description": "返信文面"},
+         }, "required": ["reply_text"]}),
+    Tool(name="rms_check_calendar_events", description="楽天のイベントカレンダー（お買い物マラソン等）を確認する（ブラウザ操作）",
+         inputSchema={"type": "object", "properties": {}}),
+    Tool(name="rms_generate_rmail_draft", description="R-Mail（メルマガ）の文面を自動生成する",
+         inputSchema={"type": "object", "properties": {
+             "topic": {"type": "string", "description": "配信テーマ: お買い物マラソン / 新商品 / (任意のテーマ)"},
+             "products": {"type": "array", "items": {"type": "string"}, "description": "対象商品リスト"},
+         }, "required": ["topic"]}),
+    Tool(name="rms_set_rpp_budget", description="RPP広告の月予算を設定する（ブラウザ操作）。Cookieが必要。",
+         inputSchema={"type": "object", "properties": {
+             "budget": {"type": "integer", "description": "月予算（円）"},
+         }, "required": ["budget"]}),
 ]
 
 
@@ -270,6 +288,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return await _upsert_product(arguments, item_api)
         elif name == "rms_issue_coupon":
             return await _issue_coupon(arguments, coupon_api)
+        elif name == "rms_post_review_reply":
+            return await _post_review_reply(arguments)
+        elif name == "rms_check_calendar_events":
+            return await _check_calendar_events(arguments)
+        elif name == "rms_generate_rmail_draft":
+            return await _generate_rmail_draft(arguments)
+        elif name == "rms_set_rpp_budget":
+            return await _set_rpp_budget(arguments)
         return [TextContent(type="text", text=f"Unknown tool: {name}")]
     finally:
         c.close()
@@ -719,6 +745,95 @@ async def _issue_coupon(args: dict, api: CouponAPI) -> list[TextContent]:
     lines.append(f"- 枚数: {args.get('issue_count', 1000)}枚")
     lines.append(f"```json\n{json.dumps(result, ensure_ascii=False, indent=2)[:500]}\n```")
     return [TextContent(type="text", text="\n".join(lines))]
+
+
+# ─── Playwright系ハンドラ ──────────────────────────────────
+
+def _check_playwright_available() -> str | None:
+    """Playwrightが使えるかチェック。使えない場合はエラーメッセージを返す。"""
+    try:
+        import playwright  # noqa: F401
+    except ImportError:
+        return "Playwrightがインストールされていません。pip install playwright && python -m playwright install chromium を実行してください。"
+
+    from pathlib import Path
+    cookie_path = Path.home() / ".cache" / "rms-playwright-cookies.json"
+    if not cookie_path.exists():
+        return "RMS Cookieが見つかりません。先にCookieリフレッシュ（rakuten-cookie-refresh）を実行してください。"
+    return None
+
+
+async def _post_review_reply(args: dict) -> list[TextContent]:
+    """レビュー返信を投稿（Playwright）."""
+    err = _check_playwright_available()
+    if err:
+        return [TextContent(type="text", text=f"❌ {err}")]
+
+    try:
+        from rms_mcp.remaining_ops import post_review_reply
+    except ImportError:
+        return [TextContent(type="text", text="❌ remaining_ops モジュールが見つかりません")]
+
+    result = await post_review_reply(
+        review_index=args.get("review_index", 0),
+        reply_text=args["reply_text"],
+        headless=True,
+    )
+    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
+
+
+async def _check_calendar_events(args: dict) -> list[TextContent]:
+    """イベントカレンダー確認（Playwright）."""
+    err = _check_playwright_available()
+    if err:
+        return [TextContent(type="text", text=f"❌ {err}")]
+
+    try:
+        from rms_mcp.remaining_ops import check_new_events
+    except ImportError:
+        return [TextContent(type="text", text="❌ remaining_ops モジュールが見つかりません")]
+
+    result = await check_new_events(headless=True)
+    events = result.get("current_events", [])
+    has_august = result.get("has_august_events", False)
+
+    lines = ["# 楽天イベントカレンダー"]
+    if events:
+        for e in events:
+            lines.append(f"- {e}")
+    else:
+        lines.append("（表示中のイベントはありません）")
+    if has_august:
+        lines.append("\n⚠️ 8月のイベントが掲載されています。早めの準備を推奨します。")
+    return [TextContent(type="text", text="\n".join(lines))]
+
+
+async def _generate_rmail_draft(args: dict) -> list[TextContent]:
+    """R-Mail文面生成（API不要）."""
+    try:
+        from rms_mcp.remaining_ops import generate_rmail_draft
+    except ImportError:
+        return [TextContent(type="text", text="❌ remaining_ops モジュールが見つかりません")]
+
+    topic = args["topic"]
+    products = args.get("products")
+    draft = generate_rmail_draft(topic, products)
+    return [TextContent(type="text", text=f"# R-Mail下書き: {topic}\n\n{draft}")]
+
+
+async def _set_rpp_budget(args: dict) -> list[TextContent]:
+    """RPP広告予算設定（Playwright）."""
+    err = _check_playwright_available()
+    if err:
+        return [TextContent(type="text", text=f"❌ {err}")]
+
+    try:
+        from rms_mcp.playwright_layer.rms_ops import set_rpp_budget
+    except ImportError:
+        return [TextContent(type="text", text="❌ rms_ops モジュールが見つかりません")]
+
+    result = await set_rpp_budget(budget=args["budget"], headless=True)
+    return [TextContent(type="text", text=json.dumps(result, ensure_ascii=False, indent=2))]
 
 
 # ─── Entrypoint ───────────────────────────────────────────
